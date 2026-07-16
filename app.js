@@ -1,4 +1,4 @@
-const state={view:"candidates",candidates:[],progress:[],today:[],selected:null};
+const state={view:"candidates",candidates:[],progress:[],today:[],selected:null,runtimeConfig:{}};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
@@ -11,9 +11,9 @@ window.addEventListener("load",()=>{
 });
 
 function bindEvents(){
-  $("saveSetupBtn").onclick=saveSetup;
-  $("settingsBtn").onclick=showSetup;
-  $("reloadBtn").onclick=loadCurrent;
+  $("systemRetryBtn").onclick=()=>initialize(true);
+  $("settingsBtn").onclick=showDeviceSettings;
+  $("reloadBtn").onclick=()=>initialize(true);
   $("searchInput").addEventListener("input",()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(loadCurrent,350)});
   $("staffFilter").onchange=loadCurrent;
   $("regionFilter").onchange=loadCurrent;
@@ -23,59 +23,221 @@ function bindEvents(){
   $("copyProposalBtn").onclick=copyProposal;
 }
 
-function initialize(){
-  const api=localStorage.getItem("wc_api_url")||config.GAS_API_URL||"";
-  const pin=localStorage.getItem("wc_pin")||"";
-  if(!api||!pin)return showSetup();
-  $("appPanel").hidden=false;
-  $("setupPanel").hidden=true;
-  loadFilters();
-  loadDashboard();
-  loadCurrent();
-}
-
-function showSetup(){
-  $("appPanel").hidden=true;$("setupPanel").hidden=false;
-  $("apiUrlInput").value=localStorage.getItem("wc_api_url")||config.GAS_API_URL||"";
-  $("pinInput").value=localStorage.getItem("wc_pin")||"";
-}
-
-async function saveSetup(){
-  const api=$("apiUrlInput").value.trim().replace(/\/+$/,"");
-  const pin=$("pinInput").value.trim();
-  if(!api||!pin)return setMsg("setupMessage","URLとPINを入力してください。","error");
-  setMsg("setupMessage","接続確認中...");
+async function initialize(force=false){
   try{
-    const res=await apiGet("dashboard",{},api,pin);
-    localStorage.setItem("wc_api_url",api);localStorage.setItem("wc_pin",pin);
-    setMsg("setupMessage","接続できました。","success");
-    $("appPanel").hidden=false;$("setupPanel").hidden=true;
-    await loadFilters();renderDashboard(res);await loadCurrent();
-  }catch(e){setMsg("setupMessage",e.message,"error")}
+    hideSystemPanel();
+    const api=getApi();
+    if(!api||api.includes("ここにGAS")){
+      return showSystemError(
+        "管理者設定エラー",
+        "GASウェブアプリURLが設定されていません。管理者へ連絡してください。"
+      );
+    }
+
+    ensureDeviceId();
+    let token=getToken();
+
+    // 初回は画面を出さず、端末を自動登録する。
+    if(!token){
+      const oldPin=localStorage.getItem("wc_pin")||"";
+      try{
+        const enrolled=await enrollDevice(oldPin);
+        token=enrolled.token;
+        localStorage.removeItem("wc_pin");
+      }catch(error){
+        return showEnrollmentError(error);
+      }
+    }
+
+    state.runtimeConfig=await apiGet("config",{},api,token);
+
+    if(state.runtimeConfig.maintenance){
+      return showMaintenance(
+        state.runtimeConfig.maintenanceMessage||"現在メンテナンス中です。"
+      );
+    }
+
+    $("appPanel").hidden=false;
+    hideSystemPanel();
+
+    if(force){
+      setStatus("最新設定を読み込みました。");
+    }
+
+    await loadFilters();
+    await loadDashboard();
+    await loadCurrent();
+
+  }catch(error){
+    if(isDeviceAuthError(error)){
+      clearToken();
+      try{
+        await enrollDevice("");
+        return initialize(force);
+      }catch(enrollError){
+        return showEnrollmentError(enrollError);
+      }
+    }
+
+    showSystemError("接続エラー",error.message||"システムへ接続できませんでした。");
+  }
 }
 
-function getApi(){return localStorage.getItem("wc_api_url")||config.GAS_API_URL||""}
-function getPin(){return localStorage.getItem("wc_pin")||""}
+function getApi(){
+  return String(config.GAS_API_URL||"").trim().replace(/\/+$/,"");
+}
 
-async function apiGet(action,params={},api=getApi(),pin=getPin()){
+function ensureDeviceId(){
+  let id=localStorage.getItem("wc_device_id");
+  if(!id){
+    id=(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    localStorage.setItem("wc_device_id",id);
+  }
+  return id;
+}
+
+function getDeviceName(){
+  const platform=navigator.userAgentData?.platform||navigator.platform||"端末";
+  const mobile=/iPhone|iPad|Android|Mobile/i.test(navigator.userAgent)?"スマホ":"PC";
+  return `${mobile} / ${platform}`.slice(0,100);
+}
+
+function getToken(){
+  return localStorage.getItem("wc_device_token")||"";
+}
+
+function saveToken(token){
+  localStorage.setItem("wc_device_token",token);
+}
+
+function clearToken(){
+  localStorage.removeItem("wc_device_token");
+}
+
+async function enrollDevice(pin=""){
+  const api=getApi();
   const url=new URL(api);
-  url.searchParams.set("api","1");url.searchParams.set("action",action);url.searchParams.set("pin",pin);
-  Object.entries(params).forEach(([k,v])=>{if(v!==undefined&&v!==null&&String(v)!=="")url.searchParams.set(k,v)});
-  const r=await fetch(url.toString(),{redirect:"follow",cache:"no-store"});
-  const j=await r.json();
-  if(!j.success)throw new Error(j.error||"APIエラー");
-  return j.data;
+  url.searchParams.set("api","1");
+  url.searchParams.set("action","enroll");
+  url.searchParams.set("deviceId",ensureDeviceId());
+  url.searchParams.set("deviceName",getDeviceName());
+  if(pin)url.searchParams.set("pin",pin);
+
+  const response=await fetch(url.toString(),{
+    redirect:"follow",
+    cache:"no-store"
+  });
+  const json=await response.json();
+
+  if(!json.success){
+    const error=new Error(json.error||"端末登録に失敗しました。");
+    error.code=json.code||"ENROLL_ERROR";
+    throw error;
+  }
+
+  saveToken(json.data.token);
+  state.runtimeConfig=json.data.config||{};
+  return json.data;
+}
+
+function hideSystemPanel(){
+  const panel=$("systemPanel");
+  if(panel)panel.hidden=true;
+}
+
+function showSystemError(title,message){
+  $("appPanel").hidden=true;
+  $("systemPanel").hidden=false;
+  $("systemTitle").textContent=title||"エラー";
+  $("systemMessage").textContent=message||"システムへ接続できませんでした。";
+  $("systemRetryBtn").hidden=false;
+}
+
+function showEnrollmentError(error){
+  const code=error&&error.code?error.code:"";
+  let message=error&&error.message?error.message:"端末の自動登録に失敗しました。";
+
+  if(code==="ENROLL_ERROR"||message.includes("PIN")){
+    message="端末の自動登録が許可されていません。管理者に PWA_AUTO_ENROLL の設定確認を依頼してください。";
+  }
+
+  showSystemError("端末登録エラー",message);
+}
+
+function showDeviceSettings(){
+  const deviceId=localStorage.getItem("wc_device_id")||"";
+  const deviceName=state.runtimeConfig.deviceName||getDeviceName();
+  alert(
+    `端末登録済みです。\n\n端末名：${deviceName}\n端末ID：${deviceId.slice(0,12)}…\n\n設定変更は管理者側から自動反映されます。`
+  );
+}
+
+function showMaintenance(message){
+  $("appPanel").hidden=true;
+  $("systemPanel").hidden=false;
+  $("systemTitle").textContent="メンテナンス中";
+  $("systemMessage").textContent=message||"現在メンテナンス中です。";
+  $("systemRetryBtn").hidden=true;
+}
+
+function isDeviceAuthError(error){
+  return [
+    "DEVICE_ENROLL_REQUIRED",
+    "DEVICE_TOKEN_INVALID",
+    "DEVICE_TOKEN_EXPIRED",
+    "DEVICE_DISABLED"
+  ].includes(error.code);
+}
+
+async function apiGet(action,params={},api=getApi(),token=getToken()){
+  const url=new URL(api);
+  url.searchParams.set("api","1");
+  url.searchParams.set("action",action);
+  url.searchParams.set("token",token);
+
+  Object.entries(params).forEach(([key,value])=>{
+    if(value!==undefined&&value!==null&&String(value)!==""){
+      url.searchParams.set(key,value);
+    }
+  });
+
+  const response=await fetch(url.toString(),{
+    redirect:"follow",
+    cache:"no-store"
+  });
+  const json=await response.json();
+
+  if(!json.success){
+    const error=new Error(json.error||"APIエラー");
+    error.code=json.code||"API_ERROR";
+    throw error;
+  }
+
+  return json.data;
 }
 
 async function apiPost(action,payload){
-  const r=await fetch(getApi(),{
-    method:"POST",redirect:"follow",
+  const response=await fetch(getApi(),{
+    method:"POST",
+    redirect:"follow",
     headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({wc_api:true,action,pin:getPin(),payload})
+    body:JSON.stringify({
+      wc_api:true,
+      action,
+      token:getToken(),
+      payload
+    })
   });
-  const j=await r.json();
-  if(!j.success)throw new Error(j.error||"APIエラー");
-  return j.data;
+
+  const json=await response.json();
+
+  if(!json.success){
+    const error=new Error(json.error||"APIエラー");
+    error.code=json.code||"API_ERROR";
+    throw error;
+  }
+
+  return json.data;
 }
 
 async function loadFilters(){

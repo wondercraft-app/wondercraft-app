@@ -9,8 +9,10 @@
   <meta name="apple-mobile-web-app-title" content="WonderCraft">
   <title>WonderCraft 人材管理</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="icon" href="./assets/icon-192.png">
-  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="icon" type="image/x-icon" href="./assets/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./assets/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -22,20 +24,17 @@
 
   <header class="topbar">
     <div class="brand">
-      <img src="./assets/icon-192.png" alt="WC">
+      <img src="./assets/header-logo.png" alt="WC">
       <div><small>WonderCraft</small><strong>人材管理</strong></div>
     </div>
     <button id="reloadBtn" class="icon-btn">↻</button>
   </header>
 
   <main>
-    <section id="setupPanel" class="setup-panel" hidden>
-      <h2>初期設定</h2>
-      <p>Apps ScriptのウェブアプリURLと、社内アクセスPINを入力してください。</p>
-      <label>GASウェブアプリURL<input id="apiUrlInput" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label>
-      <label>アクセスPIN<input id="pinInput" type="password" inputmode="numeric" placeholder="社内PIN"></label>
-      <button id="saveSetupBtn" class="primary">保存して接続</button>
-      <div id="setupMessage" class="message"></div>
+    <section id="systemPanel" class="setup-panel system-panel" hidden>
+      <h2 id="systemTitle">接続確認中</h2>
+      <p id="systemMessage">システムへ接続しています。</p>
+      <button id="systemRetryBtn" class="primary">再試行</button>
     </section>
 
     <section id="appPanel" hidden>
