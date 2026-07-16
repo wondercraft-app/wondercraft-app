@@ -1,16 +1,18 @@
-## Hi there 👋
+# WonderCraft v5 Production Base
 
-<!--
-**wondercraft-app/wondercraft-app** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+WonderCraft社内向け人材管理PWAの本番用土台です。
 
-Here are some ideas to get you started:
+## 含まれる機能
+- WCブランドデザイン
+- PWA対応
+- ホーム画面アイコン
+- 起動画面
+- iPhone向け追加方法ガイド
+- Androidインストール対応
+- オフライン画面
+- Service Worker
+- GAS API接続用設定ファイル
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+## GAS接続
+`config.js` の `GAS_API_URL` はPhase2で設定します。
+APIキーやLINEトークンなどの秘密情報はGitHubへ置かないでください。

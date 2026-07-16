@@ -1,0 +1,37 @@
+WonderCraft v5 本番用土台 導入手順
+
+【重要】
+ZIPファイルそのものをGitHubフォルダへ入れないでください。
+必ず「すべて展開」して、中身だけをコピーします。
+
+1. このZIPを右クリックし「すべて展開」を押します。
+2. 展開されたフォルダを開きます。
+3. 中のファイルとassetsフォルダを全部選択します。
+4. GitHub Desktopで「Show in Explorer」を押します。
+5. 開いた wondercraft-app フォルダへ貼り付けます。
+6. README.mdの上書き確認は「置き換える」で大丈夫です。
+7. GitHub Desktopに戻ります。
+8. Summaryへ「Add WonderCraft v5 production base」と入力します。
+9. 「Commit to main」を押します。
+10. 上部の「Push origin」を押します。
+11. 1〜3分後、下記URLを開きます。
+    https://wondercraft-app.github.io/wondercraft-app/
+
+正常なフォルダ構成
+wondercraft-app
+├ index.html
+├ style.css
+├ app.js
+├ config.js
+├ manifest.json
+├ service-worker.js
+├ offline.html
+├ README.md
+└ assets
+   ├ icon-192.png
+   ├ icon-512.png
+   └ icon-1024.png
+
+注意
+- ZIPがフォルダ内に残っていたら削除してください。
+- APIキー、LINEトークン、OpenAIキーは絶対にGitHubへ入れないでください。
