@@ -8,127 +8,82 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="WonderCraft">
   <title>WonderCraft 人材管理</title>
-
   <link rel="manifest" href="./manifest.json">
-  <link rel="icon" href="./assets/icon-192.png" sizes="192x192" type="image/png">
+  <link rel="icon" href="./assets/icon-192.png">
   <link rel="apple-touch-icon" href="./assets/icon-192.png">
-
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div id="splash" class="splash" aria-hidden="true">
-    <div class="splash-inner">
-      <img src="./assets/icon-512.png" alt="WonderCraft" class="splash-logo">
-      <div class="splash-title">Wonder Craft</div>
-      <div class="splash-subtitle">人材管理システム</div>
-      <div class="splash-bar"><span></span></div>
-    </div>
+  <div id="splash" class="splash">
+    <img src="./assets/icon-512.png" alt="WonderCraft">
+    <h1>Wonder Craft</h1>
+    <p>人材管理システム</p>
   </div>
 
   <header class="topbar">
     <div class="brand">
-      <img src="./assets/icon-192.png" alt="WC" class="brand-icon">
-      <div>
-        <div class="brand-kicker">WonderCraft</div>
-        <h1>人材管理</h1>
-      </div>
+      <img src="./assets/icon-192.png" alt="WC">
+      <div><small>WonderCraft</small><strong>人材管理</strong></div>
     </div>
-    <button id="installButton" class="install-button" hidden>ホーム画面に追加</button>
-    <button id="iosHelpButton" class="install-button secondary" hidden>追加方法</button>
+    <button id="reloadBtn" class="icon-btn">↻</button>
   </header>
 
-  <main class="container">
-    <section class="hero">
-      <div>
-        <p class="eyebrow">WonderCraft v5</p>
-        <h2>人材情報を、もっと見やすく。</h2>
-        <p class="hero-copy">
-          求職者、案件進捗、面談予定をスマホでまとめて確認できる社内アプリです。
-        </p>
-      </div>
+  <main>
+    <section id="setupPanel" class="setup-panel" hidden>
+      <h2>初期設定</h2>
+      <p>Apps ScriptのウェブアプリURLと、社内アクセスPINを入力してください。</p>
+      <label>GASウェブアプリURL<input id="apiUrlInput" type="url" placeholder="https://script.google.com/macros/s/.../exec"></label>
+      <label>アクセスPIN<input id="pinInput" type="password" inputmode="numeric" placeholder="社内PIN"></label>
+      <button id="saveSetupBtn" class="primary">保存して接続</button>
+      <div id="setupMessage" class="message"></div>
     </section>
 
-    <section class="quick-grid" aria-label="メニュー">
-      <button class="quick-card" data-page="people">
-        <span class="quick-icon">👤</span>
-        <span class="quick-title">求職者</span>
-        <span class="quick-caption">一覧・検索・編集</span>
-      </button>
+    <section id="appPanel" hidden>
+      <section class="dashboard">
+        <article><span>求職者</span><strong id="countCandidates">-</strong></article>
+        <article><span>案件進捗</span><strong id="countProgress">-</strong></article>
+        <article><span>本日の面談</span><strong id="countToday">-</strong></article>
+        <article><span>案件待ち</span><strong id="countWaiting">-</strong></article>
+      </section>
 
-      <button class="quick-card" data-page="progress">
-        <span class="quick-icon">📋</span>
-        <span class="quick-title">案件進捗</span>
-        <span class="quick-caption">進捗状況を確認</span>
-      </button>
+      <section class="filters">
+        <input id="searchInput" type="search" placeholder="名前・駅・会社・進捗を検索">
+        <select id="staffFilter"><option value="">担当者：全員</option></select>
+        <select id="regionFilter"><option value="">地域：すべて</option></select>
+      </section>
 
-      <button class="quick-card" data-page="interviews">
-        <span class="quick-icon">📅</span>
-        <span class="quick-title">本日の面談</span>
-        <span class="quick-caption">予定と担当者</span>
-      </button>
+      <nav class="tabs">
+        <button class="active" data-view="candidates">求職者</button>
+        <button data-view="progress">案件進捗</button>
+        <button data-view="today">本日の面談</button>
+      </nav>
 
-      <button class="quick-card" data-page="upload">
-        <span class="quick-icon">📄</span>
-        <span class="quick-title">スキル登録</span>
-        <span class="quick-caption">Phase2で接続予定</span>
-      </button>
-    </section>
-
-    <section class="status-card">
-      <div>
-        <p class="status-label">システム状態</p>
-        <h3>Phase1 公開準備完了</h3>
-        <p>次のPhase2で、現在のGoogle Apps Scriptと接続します。</p>
-      </div>
-      <span class="status-dot" aria-label="正常"></span>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">NEXT</p>
-          <h3>次に追加する機能</h3>
-        </div>
-      </div>
-
-      <div class="roadmap">
-        <div class="roadmap-item">
-          <span>1</span>
-          <div>
-            <strong>GAS API接続</strong>
-            <p>現在の求職者一覧・案件進捗を表示</p>
-          </div>
-        </div>
-        <div class="roadmap-item">
-          <span>2</span>
-          <div>
-            <strong>編集機能</strong>
-            <p>スマホからスプレッドシートを更新</p>
-          </div>
-        </div>
-        <div class="roadmap-item">
-          <span>3</span>
-          <div>
-            <strong>営業管理アプリ</strong>
-            <p>同じデザインで別アプリを追加</p>
-          </div>
-        </div>
-      </div>
-    </section>
-    <section id="iosGuide" class="ios-guide" hidden>
-      <div class="ios-guide-card">
-        <button id="closeIosGuide" class="ios-close" aria-label="閉じる">×</button>
-        <h3>iPhoneでホーム画面に追加</h3>
-        <p>Safari下部の共有ボタンを押し、「ホーム画面に追加」を選んでください。</p>
-      </div>
+      <div id="status" class="status"></div>
+      <section id="cards" class="cards"></section>
     </section>
   </main>
 
-  <nav class="bottom-nav" aria-label="下部メニュー">
-    <button class="active" data-page="home">ホーム</button>
-    <button data-page="people">求職者</button>
-    <button data-page="progress">案件</button>
-    <button data-page="interviews">面談</button>
+  <div id="modal" class="modal" hidden>
+    <div class="backdrop" data-close></div>
+    <section class="modal-panel">
+      <header><h2 id="modalTitle">編集</h2><button data-close>×</button></header>
+      <form id="editForm">
+        <div id="formFields" class="form-grid"></div>
+        <div id="modalMessage" class="message"></div>
+        <footer>
+          <button type="button" id="copyProposalBtn" class="secondary">紹介文コピー</button>
+          <button type="button" data-close class="secondary">キャンセル</button>
+          <button type="submit" class="primary">保存</button>
+        </footer>
+      </form>
+    </section>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="active" data-view="candidates">求職者</button>
+    <button data-view="progress">案件</button>
+    <button data-view="today">面談</button>
+    <button id="settingsBtn">設定</button>
   </nav>
 
   <script src="./config.js"></script>

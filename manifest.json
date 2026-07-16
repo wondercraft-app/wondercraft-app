@@ -1,7 +1,6 @@
 {
   "name": "WonderCraft 人材管理システム",
   "short_name": "人材管理",
-  "description": "WonderCraft社内向け人材管理アプリ",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
