@@ -1,10 +1,10 @@
-const CACHE="wondercraft-v6-1-home";
+const CACHE="wondercraft-wc-6-2";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=6.1.0",
-  "./config.js?v=6.1.0",
-  "./app.js?v=6.1.0",
+  "./style.css?v=6.2.0",
+  "./config.js?v=6.2.0",
+  "./app.js?v=6.2.0",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png",

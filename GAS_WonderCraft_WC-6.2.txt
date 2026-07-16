@@ -1,0 +1,4909 @@
+/*
+ * WonderCraft LINE案件管理AI Ver2 統合完全版
+ * 更新日: 2026-07-16
+ * v5.1追加: 求職者進捗が「取り下げ／取下げ」の行をPWAから非表示
+ * v5.2追加: 案件進捗が「不合格／辞退／案件消滅／合格」の行をPWAから非表示
+ * v5.3追加: 求職者進捗が「完了／完了済み」の行もPWAから非表示
+ * v5.4追加: 端末トークン認証・自動端末登録・管理者設定の自動反映
+ * v5.6追加: 毎朝8時、当日の面談予定を担当者別に個人LINEへ通知
+ * v5.6.1修正: 案件進捗シートの見出し行と備考列を自動検出
+ * v6.0追加: PWAの本日の面談を担当者で絞らず会社全体・時間順で返す
+ * WC-6.2追加: 案件進捗プルダウンAPI・LINE進捗更新・更新確認・更新履歴
+ *
+ * 追加修正:
+ * - 全国駅マスタから都道府県を判定（駅マスタ!A列=駅名、D列=都道府県）
+ * - LINE送信者を担当者へ自動紐付け（8名限定）
+ * - 判定不能時は担当者名を一度返信して担当者マスタへ保存
+ * - 案件紹介文を SB経験者／ドコモ経験者／au経験者 に統一
+ * - 案件進捗登録時の青白交互色・罫線・プルダウンを維持
+ * - 面談リマインドの日付判定をDate型・文字列の両方に対応
+ */
+
+/******************************
+ * 設定
+ ******************************/
+const CONFIG = {
+  progressSheetName: "案件進捗",
+  progressHistorySheetName: "案件進捗更新履歴",
+  stationMasterSheetName: "駅マスタ",
+  staffMasterSheetName: "担当者マスタ",
+
+  allowedStaff: [
+    "山本", "白木", "吉本", "荒井",
+    "森田", "長崎", "上澤", "山田"
+  ],
+
+  skillSheetNames: {
+    tokai: "東海",
+    kansai: "関西",
+    kanto: "関東",
+    kyushu: "九州",
+    other: "その他",
+    remote: "リモート"
+  },
+
+  // A:入力日 B:担当者 C:名前 D:都道府県 E:最寄駅 F:提案元会社 G:希望単価
+  // H:キャリア I:経験値 J:開始希望 K:更新日 L:進捗 M:移動型可否 N:備考
+  skillStartCol: 1,
+  skillColCount: 14,
+
+  templateRow: 5,
+
+  // 正常な白行・青行をテンプレートとして使う
+  templateWhiteRow: 5,
+  templateBlueRow: 6,
+
+  defaultProgress: "案件待ち",
+
+  openaiModel: "gpt-4.1-mini",
+
+  // 東海・関西・関東・九州・その他・リモートのフォルダが入っている親フォルダID
+  driveParentFolderId: "1cWx1zS9gJc32jXL3UwJ49ZB-cYACUjy5"
+};
+
+
+/******************************
+ * メイン処理
+ ******************************/
+function doPost(e) {
+  // GitHub Pages版PWAからのAPIリクエストを先に処理
+  if (isPwaApiRequest_(e)) {
+    return handlePwaApiPost_(e);
+  }
+
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const event = data.events && data.events[0];
+
+    if (!event || !event.message) {
+      return ContentService.createTextOutput("OK");
+    }
+
+    const message = event.message;
+    const replyToken = event.replyToken;
+
+    const lineTo = getLineSendTargetId_(event);
+    const sessionId = lineTo || "unknown";
+    const uploaderUserId = event.source && event.source.userId
+      ? event.source.userId
+      : "";
+
+    /******************************
+     * テキストメッセージ
+     ******************************/
+    if (message.type === "text") {
+      const text = message.text.trim();
+
+      const waitingFields = getWaitingFields_(sessionId);
+      const pendingForCommand = getPendingData_(sessionId);
+      const pendingProgressUpdate = getPendingProgressUpdate_(sessionId);
+
+      const isSkillReadCommand =
+        text.startsWith("スキル登録") ||
+        text.startsWith("読取");
+
+      const isProgressCommand =
+        text.startsWith("進捗登録");
+
+      const isProgressUpdateConfirm =
+        pendingProgressUpdate &&
+        (text === "更新" || text === "確定");
+
+      const isProgressUpdateCancel =
+        pendingProgressUpdate &&
+        (text === "キャンセル" || text === "取消" || text === "取り消し");
+
+      const isProgressUpdateRequest =
+        !pendingProgressUpdate &&
+        isLineProgressUpdateIntent_(text);
+
+      const isReminderSettingCommand =
+        text === "リマインド先設定" ||
+        text === "リマインド設定" ||
+        text === "通知先設定";
+
+      const isConfirmCommand =
+        pendingForCommand &&
+        (
+          text === "はい" ||
+          text === "登録" ||
+          text === "OK" ||
+          text === "ok"
+        );
+
+      const isModifyCommand =
+        pendingForCommand &&
+        text.startsWith("修正");
+
+      const isWaitingAnswer =
+        waitingFields.length > 0 && pendingForCommand;
+
+      const waitingStaffSelection = getWaitingStaffSelection_(sessionId);
+      const selectedStaffFromText = extractAllowedStaffName_(text);
+      const isStaffSelectionReply =
+        waitingStaffSelection &&
+        selectedStaffFromText !== "";
+
+      // 通常会話は完全に無視
+      if (
+        !isSkillReadCommand &&
+        !isProgressCommand &&
+        !isProgressUpdateConfirm &&
+        !isProgressUpdateCancel &&
+        !isProgressUpdateRequest &&
+        !isReminderSettingCommand &&
+        !isConfirmCommand &&
+        !isModifyCommand &&
+        !isWaitingAnswer &&
+        !isStaffSelectionReply
+      ) {
+        return ContentService.createTextOutput("OK");
+      }
+
+      /******************************
+       * LINE案件進捗更新：確認・取消・解析
+       ******************************/
+      if (isProgressUpdateCancel) {
+        clearPendingProgressUpdate_(sessionId);
+        replyLine_(replyToken, "案件進捗の更新をキャンセルしました。");
+        return ContentService.createTextOutput("OK");
+      }
+
+      if (isProgressUpdateConfirm) {
+        const updater = resolveUploaderStaff_(event);
+        const result = applyPendingProgressUpdate_(
+          sessionId,
+          updater.staff || updater.displayName || "LINE担当者",
+          uploaderUserId
+        );
+        replyLine_(replyToken, makeProgressUpdateCompletedText_(result));
+        return ContentService.createTextOutput("OK");
+      }
+
+      if (isProgressUpdateRequest) {
+        try {
+          const parsed = parseLineProgressUpdateRequest_(text);
+          savePendingProgressUpdate_(sessionId, parsed);
+          replyLine_(replyToken, makeProgressUpdateConfirmText_(parsed));
+        } catch (progressUpdateError) {
+          replyLine_(replyToken, progressUpdateError.message);
+        }
+        return ContentService.createTextOutput("OK");
+      }
+
+      /******************************
+       * 担当者選択の回答
+       ******************************/
+      if (isStaffSelectionReply) {
+        const selectedStaff = selectedStaffFromText;
+        const waiting = getWaitingStaffSelection_(sessionId);
+
+        saveStaffMapping_(
+          waiting.userId || uploaderUserId,
+          waiting.displayName || "",
+          selectedStaff
+        );
+
+        let pending = getPendingData_(sessionId);
+
+        if (pending) {
+          let people = normalizeSkillDataList_(pending);
+          people = people.map(person => {
+            person.tantousha = selectedStaff;
+            return normalizeSkillData_(person);
+          });
+          savePendingData_(sessionId, { people: people });
+        }
+
+        clearWaitingStaffSelection_(sessionId);
+
+        replyLine_(
+          replyToken,
+          "担当者を「" + selectedStaff + "」で登録しました。\n\n" +
+          (pending ? makeConfirmTextForPeople_(normalizeSkillDataList_(pending).map(person => {
+            person.tantousha = selectedStaff;
+            return normalizeSkillData_(person);
+          })) : "次回から自動判定します。")
+        );
+
+        return ContentService.createTextOutput("OK");
+      }
+
+      /******************************
+       * リマインド送信先設定
+       ******************************/
+      if (isReminderSettingCommand) {
+        if (!lineTo) {
+          replyLine_(replyToken, "送信先IDが取得できませんでした。");
+          return ContentService.createTextOutput("OK");
+        }
+
+        PropertiesService.getScriptProperties().setProperty("LINE_REMIND_TO", lineTo);
+
+        replyLine_(
+          replyToken,
+          "リマインド送信先をこのトークに設定しました。"
+        );
+
+        return ContentService.createTextOutput("OK");
+      }
+
+      /******************************
+       * 進捗登録
+       ******************************/
+      if (text.startsWith("進捗登録")) {
+        const progressText = text
+          .replace(/^進捗登録\s*/, "")
+          .trim();
+
+        if (!progressText) {
+          replyLine_(
+            replyToken,
+            "進捗登録の内容がありません。\n\n例：\n進捗登録\n【エントリー月】6月\n【人員担当者】森田\n【所属会社名】DTC\n【名前】海野 航希\n【案件担当者】山本\n【上位会社名】lotus\n【案件進捗】エントリー中(面談日調整中)\n【エリア】東海\n【備考】"
+          );
+          return ContentService.createTextOutput("OK");
+        }
+
+        handleTextMessage_(progressText);
+
+        replyLine_(replyToken, "案件進捗に登録しました。");
+
+        return ContentService.createTextOutput("OK");
+      }
+
+      /******************************
+       * 不足項目の回答待ち
+       ******************************/
+      if (waitingFields.length > 0) {
+        const pending = getPendingData_(sessionId);
+
+        if (!pending) {
+          clearWaitingFields_(sessionId);
+          replyLine_(
+            replyToken,
+            "読み取りデータが見つかりませんでした。\nもう一度「スキル登録」または「読取」から始まる文章、PDF、Excel、画像、スプレッドシートURLを送ってください。"
+          );
+          return ContentService.createTextOutput("OK");
+        }
+
+        let people = normalizeSkillDataList_(pending);
+        people = updateRequiredFieldsByTextForPeople_(people, text, waitingFields);
+        people = people.map(person => normalizeSkillData_(person));
+
+        savePendingData_(sessionId, {
+          people: people
+        });
+
+        const stillMissing = getMissingRequiredFieldsForPeople_(people);
+
+        if (stillMissing.length > 0) {
+          saveWaitingFields_(sessionId, stillMissing);
+          replyLine_(
+            replyToken,
+            "まだ未入力の項目があります。\n\n" + makeMissingFieldsQuestionText_(stillMissing)
+          );
+          return ContentService.createTextOutput("OK");
+        }
+
+        clearWaitingFields_(sessionId);
+
+        replyLine_(
+          replyToken,
+          "不足項目を登録しました。\n\n" + makeConfirmTextForPeople_(people)
+        );
+
+        return ContentService.createTextOutput("OK");
+      }
+
+      /******************************
+       * 登録確認：「はい」
+       ******************************/
+      if (text === "はい" || text === "登録" || text === "OK" || text === "ok") {
+        const pending = getPendingData_(sessionId);
+
+        if (pending) {
+          let people = normalizeSkillDataList_(pending);
+          people = people.map(person => normalizeSkillData_(person));
+
+          people.forEach(person => {
+            const finalPerson = moveDriveFileToFinalRegionIfNeeded_(person);
+            appendSkillData_(finalPerson);
+          });
+
+          clearPendingData_(sessionId);
+          clearWaitingFields_(sessionId);
+
+          replyLine_(
+            replyToken,
+            makeRegisteredReplyText_(people)
+          );
+
+          return ContentService.createTextOutput("OK");
+        }
+      }
+
+      /******************************
+       * 読み取り結果の修正
+       ******************************/
+      if (text.startsWith("修正")) {
+        const pending = getPendingData_(sessionId);
+
+        if (!pending) {
+          replyLine_(
+            replyToken,
+            "修正できる読み取り結果がありません。\n先に「スキル登録」または「読取」から始まる文章、PDF、Excel、画像、スプレッドシートURLを送ってください。"
+          );
+          return ContentService.createTextOutput("OK");
+        }
+
+        let people = normalizeSkillDataList_(pending);
+        people = updatePendingPeopleByText_(people, text);
+        people = people.map(person => normalizeSkillData_(person));
+
+        savePendingData_(sessionId, {
+          people: people
+        });
+
+        const missingFields = getMissingRequiredFieldsForPeople_(people);
+
+        if (missingFields.length > 0) {
+          saveWaitingFields_(sessionId, missingFields);
+          replyLine_(
+            replyToken,
+            "修正しました。\nただし、まだ未入力の項目があります。\n\n" + makeMissingFieldsQuestionText_(missingFields)
+          );
+          return ContentService.createTextOutput("OK");
+        }
+
+        clearWaitingFields_(sessionId);
+
+        replyLine_(
+          replyToken,
+          "修正しました。\n\n" + makeConfirmTextForPeople_(people)
+        );
+
+        return ContentService.createTextOutput("OK");
+      }
+
+      /******************************
+       * LINE文章 / スプレッドシートURLからAI読み取り
+       * 複数名対応
+       * グループLINE対策：読み取り結果をreplyで返す
+       ******************************/
+      if (text.startsWith("読取") || text.startsWith("スキル登録")) {
+        const bodyText = text
+          .replace(/^読取\s*/, "")
+          .replace(/^スキル登録\s*/, "")
+          .trim();
+
+        if (!bodyText) {
+          replyLine_(
+            replyToken,
+            "読み取る文章がありません。\n\n例：\nスキル登録\n担当者：山本\n名前：山田太郎\n都道府県：愛知県\n最寄駅：名古屋駅\n希望単価：20000別\n\nまたは\n読取\nhttps://docs.google.com/spreadsheets/d/xxxxxxxxxxxx/edit"
+          );
+          return ContentService.createTextOutput("OK");
+        }
+
+        try {
+          let readText = bodyText;
+
+          // GoogleスプレッドシートURLなら中身を読み取る
+          if (isGoogleSpreadsheetUrl_(bodyText)) {
+            readText = extractTextFromGoogleSpreadsheetUrl_(bodyText);
+          }
+
+          const extracted = extractSkillDataByAIText_(readText);
+          let people = normalizeSkillDataList_(extracted);
+          const staffResult = applyUploaderStaffToPeople_(people, event, sessionId);
+          people = staffResult.people;
+
+          savePendingData_(sessionId, {
+            people: people
+          });
+
+          if (!staffResult.resolved) {
+            replyLine_(replyToken, makeStaffSelectionQuestionText_());
+            return ContentService.createTextOutput("OK");
+          }
+
+          const missingFields = getMissingRequiredFieldsForPeople_(people);
+
+          if (missingFields.length > 0) {
+            saveWaitingFields_(sessionId, missingFields);
+
+            replyLine_(
+              replyToken,
+              makeMissingFieldsQuestionText_(missingFields)
+            );
+
+            return ContentService.createTextOutput("OK");
+          }
+
+          replyLine_(
+            replyToken,
+            makeConfirmTextForPeople_(people)
+          );
+
+          return ContentService.createTextOutput("OK");
+
+        } catch (aiErr) {
+          console.error(aiErr);
+
+          replyLine_(
+            replyToken,
+            "読み取り中にエラーが発生しました。\n\n" +
+            "エラー内容：\n" + aiErr.message
+          );
+
+          return ContentService.createTextOutput("OK");
+        }
+      }
+
+      return ContentService.createTextOutput("OK");
+    }
+
+    /******************************
+     * 画像メッセージ
+     * 複数名対応
+     ******************************/
+    if (message.type === "image") {
+      const messageId = message.id;
+      const fileName = "line_image.jpg";
+
+      try {
+        const blob = getLineFileBlob_(messageId, fileName);
+        const extracted = extractSkillDataByAIImage_(blob, fileName);
+
+        let people = normalizeSkillDataList_(extracted);
+        const staffResult = applyUploaderStaffToPeople_(people, event, sessionId);
+        people = staffResult.people;
+
+        const firstRegionName = people.length > 0
+          ? decideSkillSheetName_(people[0])
+          : CONFIG.skillSheetNames.other;
+
+        const driveFileInfo = saveLineFileToRegionFolder_(blob, fileName, firstRegionName);
+
+        people = people.map(person => {
+          person.drive_file_id = driveFileInfo.id;
+          person.drive_file_url = driveFileInfo.url;
+          person.drive_region_name = firstRegionName;
+          return normalizeSkillData_(person);
+        });
+
+        savePendingData_(sessionId, {
+          people: people
+        });
+
+        if (staffResult && !staffResult.resolved) {
+          replyLine_(replyToken, makeStaffSelectionQuestionText_());
+          return ContentService.createTextOutput("OK");
+        }
+
+        const missingFields = getMissingRequiredFieldsForPeople_(people);
+
+        if (missingFields.length > 0) {
+          saveWaitingFields_(sessionId, missingFields);
+          replyLine_(replyToken, makeMissingFieldsQuestionText_(missingFields));
+          return ContentService.createTextOutput("OK");
+        }
+
+        replyLine_(replyToken, makeConfirmTextForPeople_(people));
+
+        return ContentService.createTextOutput("OK");
+
+      } catch (err) {
+        console.error(err);
+
+        replyLine_(
+          replyToken,
+          "画像読み取り中にエラーが発生しました。\n\n" +
+          "エラー内容：\n" + err.message
+        );
+
+        return ContentService.createTextOutput("OK");
+      }
+    }
+
+    /******************************
+     * PDF / Excelファイル
+     * 複数名対応
+     ******************************/
+    if (message.type === "file") {
+      const fileName = message.fileName || "uploaded_file";
+      const messageId = message.id;
+
+      try {
+        const blob = getLineFileBlob_(messageId, fileName);
+        const extracted = extractSkillDataFromFile_(blob, fileName);
+
+        let people = normalizeSkillDataList_(extracted);
+        const staffResult = applyUploaderStaffToPeople_(people, event, sessionId);
+        people = staffResult.people;
+
+        const firstRegionName = people.length > 0
+          ? decideSkillSheetName_(people[0])
+          : CONFIG.skillSheetNames.other;
+
+        const driveFileInfo = saveLineFileToRegionFolder_(blob, fileName, firstRegionName);
+
+        people = people.map(person => {
+          person.drive_file_id = driveFileInfo.id;
+          person.drive_file_url = driveFileInfo.url;
+          person.drive_region_name = firstRegionName;
+          return normalizeSkillData_(person);
+        });
+
+        savePendingData_(sessionId, {
+          people: people
+        });
+
+        if (staffResult && !staffResult.resolved) {
+          replyLine_(replyToken, makeStaffSelectionQuestionText_());
+          return ContentService.createTextOutput("OK");
+        }
+
+        const missingFields = getMissingRequiredFieldsForPeople_(people);
+
+        if (missingFields.length > 0) {
+          saveWaitingFields_(sessionId, missingFields);
+          replyLine_(replyToken, makeMissingFieldsQuestionText_(missingFields));
+          return ContentService.createTextOutput("OK");
+        }
+
+        replyLine_(replyToken, makeConfirmTextForPeople_(people));
+
+        return ContentService.createTextOutput("OK");
+
+      } catch (err) {
+        console.error(err);
+
+        replyLine_(
+          replyToken,
+          "ファイル読み取り中にエラーが発生しました。\n\n" +
+          "ファイル名：" + fileName + "\n\n" +
+          "エラー内容：\n" + err.message
+        );
+
+        return ContentService.createTextOutput("OK");
+      }
+    }
+
+    return ContentService.createTextOutput("OK");
+
+  } catch (err) {
+    console.error(err);
+
+    try {
+      const data = JSON.parse(e.postData.contents);
+      const event = data.events && data.events[0];
+      const replyToken = event && event.replyToken;
+      const lineTo = getLineSendTargetId_(event);
+
+      const errorText = "エラーが発生しました。\n\n" + err.message;
+
+      if (replyToken) {
+        try {
+          replyLine_(replyToken, errorText);
+        } catch (replyErr) {
+          console.error(replyErr);
+
+          if (lineTo) {
+            pushLine_(lineTo, errorText);
+          }
+        }
+      } else if (lineTo) {
+        pushLine_(lineTo, errorText);
+      }
+
+    } catch (e2) {
+      console.error(e2);
+    }
+
+    return ContentService.createTextOutput("OK");
+  }
+}
+
+
+/******************************
+ * ブラウザ確認用
+ ******************************/
+function doGet(e) {
+  try {
+    return handlePwaApiGet_(e || {});
+  } catch (error) {
+    return createPwaJsonResponse_({
+      success: false,
+      error: error && error.message ? error.message : String(error)
+    });
+  }
+}
+
+
+/******************************
+ * LINE送信先IDを取得
+ ******************************/
+function getLineSendTargetId_(event) {
+  if (!event || !event.source) {
+    return "";
+  }
+
+  console.log("source情報: " + JSON.stringify(event.source));
+
+  if (event.source.groupId) {
+    console.log("送信先はグループ: " + event.source.groupId);
+    return event.source.groupId;
+  }
+
+  if (event.source.roomId) {
+    console.log("送信先はルーム: " + event.source.roomId);
+    return event.source.roomId;
+  }
+
+  if (event.source.userId) {
+    console.log("送信先は個人: " + event.source.userId);
+    return event.source.userId;
+  }
+
+  return "";
+}
+
+
+/******************************
+ * スキルシート送信者から担当者を判定
+ ******************************/
+function applyUploaderStaffToPeople_(people, event, sessionId) {
+  const result = resolveUploaderStaff_(event);
+
+  if (!result.staff) {
+    saveWaitingStaffSelection_(sessionId, {
+      userId: result.userId || "",
+      displayName: result.displayName || ""
+    });
+
+    return {
+      resolved: false,
+      people: people.map(person => {
+        person.tantousha = "";
+        return normalizeSkillData_(person);
+      })
+    };
+  }
+
+  clearWaitingStaffSelection_(sessionId);
+
+  return {
+    resolved: true,
+    people: people.map(person => {
+      person.tantousha = result.staff;
+      return normalizeSkillData_(person);
+    })
+  };
+}
+
+function resolveUploaderStaff_(event) {
+  const userId = event && event.source && event.source.userId
+    ? event.source.userId
+    : "";
+
+  if (!userId) {
+    return { userId: "", displayName: "", staff: "" };
+  }
+
+  const savedStaff = getSavedStaffByUserId_(userId);
+  if (savedStaff) {
+    return { userId: userId, displayName: "", staff: savedStaff };
+  }
+
+  const displayName = getLineDisplayNameSafe_(userId);
+  const staff = extractAllowedStaffName_(displayName);
+
+  if (staff) {
+    saveStaffMapping_(userId, displayName, staff);
+  }
+
+  return {
+    userId: userId,
+    displayName: displayName,
+    staff: staff
+  };
+}
+
+function getLineDisplayNameSafe_(userId) {
+  if (!userId) return "";
+
+  const token = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+  if (!token) return "";
+
+  const res = UrlFetchApp.fetch(
+    "https://api.line.me/v2/bot/profile/" + encodeURIComponent(userId),
+    {
+      method: "get",
+      headers: { Authorization: "Bearer " + token },
+      muteHttpExceptions: true
+    }
+  );
+
+  if (res.getResponseCode() !== 200) return "";
+
+  try {
+    return JSON.parse(res.getContentText()).displayName || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function extractAllowedStaffName_(text) {
+  const normalized = String(text || "").normalize("NFKC").replace(/\s+/g, "");
+  const matches = (CONFIG.allowedStaff || []).filter(name => normalized.includes(name));
+  return matches.length === 1 ? matches[0] : "";
+}
+
+function normalizeAllowedStaffValue_(value) {
+  return extractAllowedStaffName_(value);
+}
+
+function getOrCreateStaffMasterSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.staffMasterSheetName || "担当者マスタ");
+
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.staffMasterSheetName || "担当者マスタ");
+    sheet.getRange(1, 1, 1, 3).setValues([["LINE userId", "LINE表示名", "担当者"]]);
+    sheet.setFrozenRows(1);
+  }
+
+  return sheet;
+}
+
+function getSavedStaffByUserId_(userId) {
+  if (!userId) return "";
+
+  const sheet = getOrCreateStaffMasterSheet_();
+  if (sheet.getLastRow() < 2) return "";
+
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getDisplayValues();
+
+  for (let i = 0; i < values.length; i++) {
+    if (values[i][0] === userId) {
+      return normalizeAllowedStaffValue_(values[i][2]);
+    }
+  }
+
+  return "";
+}
+
+function saveStaffMapping_(userId, displayName, staff) {
+  const normalizedStaff = normalizeAllowedStaffValue_(staff);
+  if (!userId || !normalizedStaff) return;
+
+  const sheet = getOrCreateStaffMasterSheet_();
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow >= 2) {
+    const ids = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues().flat();
+    const index = ids.indexOf(userId);
+
+    if (index >= 0) {
+      sheet.getRange(index + 2, 1, 1, 3).setValues([[userId, displayName || "", normalizedStaff]]);
+      return;
+    }
+  }
+
+  sheet.appendRow([userId, displayName || "", normalizedStaff]);
+}
+
+function saveWaitingStaffSelection_(sessionId, data) {
+  PropertiesService.getScriptProperties().setProperty(
+    "WAITING_STAFF_" + sessionId,
+    JSON.stringify(data || {})
+  );
+}
+
+function getWaitingStaffSelection_(sessionId) {
+  const raw = PropertiesService.getScriptProperties().getProperty("WAITING_STAFF_" + sessionId);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearWaitingStaffSelection_(sessionId) {
+  PropertiesService.getScriptProperties().deleteProperty("WAITING_STAFF_" + sessionId);
+}
+
+function makeStaffSelectionQuestionText_() {
+  return [
+    "担当者を判定できませんでした。",
+    "次の8名から担当者名を返信してください。",
+    "",
+    "山本／白木／吉本／荒井／森田／長崎／上澤／山田"
+  ].join("\n");
+}
+
+/******************************
+ * 進捗登録処理
+ ******************************/
+function handleTextMessage_(text) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.progressSheetName);
+
+  if (!sheet) {
+    throw new Error("シートが見つかりません: " + CONFIG.progressSheetName);
+  }
+
+  const getValue = (label) => {
+    const regex = new RegExp("【" + label + "】\\s*([^\\n]*)");
+    const match = text.match(regex);
+    return match ? match[1].trim() : "";
+  };
+
+  const targetRow = Math.max(sheet.getLastRow() + 1, 2);
+  const lastCol = Math.max(sheet.getLastColumn(), 10);
+
+  if (targetRow > sheet.getMaxRows()) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), targetRow - sheet.getMaxRows());
+  }
+
+  // 青・白の交互行を維持するため、直前行ではなく2行前から書式をコピーする。
+  // 2行前がない場合のみ直前の正常行を使用する。
+  let sourceRow = targetRow - 2;
+  if (sourceRow < 2) sourceRow = 2;
+
+  const sourceRange = sheet.getRange(sourceRow, 1, 1, lastCol);
+  const targetRange = sheet.getRange(targetRow, 1, 1, lastCol);
+
+  // 値や数式を持ち込まず、書式と入力規則だけをコピーする。
+  sourceRange.copyTo(
+    targetRange,
+    SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
+    false
+  );
+  sourceRange.copyTo(
+    targetRange,
+    SpreadsheetApp.CopyPasteType.PASTE_DATA_VALIDATION,
+    false
+  );
+
+  targetRange.clearContent();
+  sheet.setRowHeight(targetRow, sheet.getRowHeight(sourceRow));
+
+  sheet.getRange(targetRow, 2, 1, 9).setValues([[
+    getValue("エントリー月"),
+    getValue("人員担当者"),
+    getValue("所属会社名"),
+    getValue("名前"),
+    getValue("案件担当者"),
+    getValue("上位会社名"),
+    getValue("案件進捗"),
+    getValue("エリア"),
+    getValue("備考")
+  ]]);
+
+  SpreadsheetApp.flush();
+}
+
+/******************************
+ * LINEからファイル取得
+ ******************************/
+function getLineFileBlob_(messageId, fileName) {
+  const token = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+
+  if (!token) {
+    throw new Error("LINE_CHANNEL_ACCESS_TOKEN が設定されていません。");
+  }
+
+  if (!messageId) {
+    throw new Error("messageId が取得できませんでした。");
+  }
+
+  const url = "https://api-data.line.me/v2/bot/message/" + messageId + "/content";
+
+  const res = UrlFetchApp.fetch(url, {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  });
+
+  const code = res.getResponseCode();
+  const bodyText = res.getContentText();
+
+  if (code < 200 || code >= 300) {
+    throw new Error(
+      "LINEファイル取得エラー\n" +
+      "ステータスコード：" + code + "\n\n" +
+      "レスポンス：\n" + bodyText
+    );
+  }
+
+  const blob = res.getBlob();
+
+  if (!blob || blob.getBytes().length === 0) {
+    throw new Error("LINEから取得したファイルが空でした。");
+  }
+
+  return blob.setName(fileName);
+}
+
+
+/******************************
+ * 登録先フォルダへファイル保存
+ ******************************/
+function saveLineFileToRegionFolder_(blob, fileName, regionName) {
+  const parentFolderId = CONFIG.driveParentFolderId;
+
+  if (!parentFolderId || parentFolderId === "ここに親フォルダIDを入れる") {
+    throw new Error("driveParentFolderId が設定されていません。");
+  }
+
+  const parentFolder = DriveApp.getFolderById(parentFolderId);
+  const folders = parentFolder.getFoldersByName(regionName);
+
+  if (!folders.hasNext()) {
+    throw new Error("保存先フォルダが見つかりません: " + regionName);
+  }
+
+  const targetFolder = folders.next();
+
+  const now = Utilities.formatDate(
+    new Date(),
+    "Asia/Tokyo",
+    "yyyyMMdd_HHmmss"
+  );
+
+  const safeFileName = now + "_" + fileName;
+  const file = targetFolder.createFile(blob.copyBlob().setName(safeFileName));
+
+  return {
+    id: file.getId(),
+    url: file.getUrl()
+  };
+}
+
+
+/******************************
+ * 最終登録先に合わせてDriveファイルを移動
+ ******************************/
+function moveDriveFileToFinalRegionIfNeeded_(data) {
+  if (!data.drive_file_id) {
+    return data;
+  }
+
+  const finalRegionName = decideSkillSheetName_(data);
+  const currentRegionName = data.drive_region_name || "";
+
+  if (!finalRegionName || finalRegionName === currentRegionName) {
+    return data;
+  }
+
+  const parentFolderId = CONFIG.driveParentFolderId;
+
+  if (!parentFolderId || parentFolderId === "ここに親フォルダIDを入れる") {
+    return data;
+  }
+
+  const parentFolder = DriveApp.getFolderById(parentFolderId);
+  const targetFolders = parentFolder.getFoldersByName(finalRegionName);
+
+  if (!targetFolders.hasNext()) {
+    return data;
+  }
+
+  const targetFolder = targetFolders.next();
+  const file = DriveApp.getFileById(data.drive_file_id);
+
+  const regionNames = [
+    CONFIG.skillSheetNames.tokai,
+    CONFIG.skillSheetNames.kansai,
+    CONFIG.skillSheetNames.kanto,
+    CONFIG.skillSheetNames.kyushu,
+    CONFIG.skillSheetNames.other,
+    CONFIG.skillSheetNames.remote
+  ];
+
+  regionNames.forEach(name => {
+    const folders = parentFolder.getFoldersByName(name);
+
+    while (folders.hasNext()) {
+      const folder = folders.next();
+
+      try {
+        folder.removeFile(file);
+      } catch (e) {
+        // 入っていない場合は無視
+      }
+    }
+  });
+
+  targetFolder.addFile(file);
+
+  data.drive_region_name = finalRegionName;
+  data.drive_file_url = file.getUrl();
+
+  return normalizeSkillData_(data);
+}
+
+
+/******************************
+ * PDF / Excelから必要事項を抽出
+ ******************************/
+function extractSkillDataFromFile_(blob, fileName) {
+  const lower = fileName.toLowerCase();
+
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+    const text = extractTextFromExcel_(blob, fileName);
+    return extractSkillDataByAIText_(text);
+  }
+
+  if (lower.endsWith(".pdf")) {
+    return extractSkillDataByAIPdf_(blob, fileName);
+  }
+
+  throw new Error("対応していないファイル形式です: " + fileName);
+}
+
+
+/******************************
+ * Excelをテキスト化
+ * Drive API v2 / v3 両対応
+ ******************************/
+function extractTextFromExcel_(blob, fileName) {
+  let convertedFile;
+
+  try {
+    convertedFile = Drive.Files.insert(
+      {
+        title: fileName,
+        mimeType: MimeType.GOOGLE_SHEETS
+      },
+      blob,
+      {
+        convert: true
+      }
+    );
+  } catch (insertErr) {
+    try {
+      convertedFile = Drive.Files.create(
+        {
+          name: fileName,
+          mimeType: MimeType.GOOGLE_SHEETS
+        },
+        blob
+      );
+    } catch (createErr) {
+      throw new Error(
+        "Excel変換に失敗しました。\n\n" +
+        "GASのサービスで Drive API が追加されているか確認してください。\n\n" +
+        "insertエラー: " + insertErr.message + "\n" +
+        "createエラー: " + createErr.message
+      );
+    }
+  }
+
+  if (!convertedFile || !convertedFile.id) {
+    throw new Error("ExcelファイルのGoogleスプレッドシート変換に失敗しました。");
+  }
+
+  const ss = SpreadsheetApp.openById(convertedFile.id);
+  const sheets = ss.getSheets();
+
+  let text = "";
+
+  sheets.forEach(sh => {
+    const values = sh.getDataRange().getDisplayValues();
+
+    text += "\n\n--- シート名: " + sh.getName() + " ---\n";
+
+    values.forEach(row => {
+      const line = row
+        .map(v => String(v || "").trim())
+        .filter(v => v !== "")
+        .join(" / ");
+
+      if (line) {
+        text += line + "\n";
+      }
+    });
+  });
+
+  DriveApp.getFileById(convertedFile.id).setTrashed(true);
+
+  if (!text.trim()) {
+    throw new Error("Excelから文字を読み取れませんでした。");
+  }
+
+  return text;
+}
+
+
+/******************************
+ * GoogleスプレッドシートURL判定
+ ******************************/
+function isGoogleSpreadsheetUrl_(text) {
+  const value = String(text || "");
+  return value.includes("docs.google.com/spreadsheets/d/");
+}
+
+
+/******************************
+ * GoogleスプレッドシートURLからIDを抽出
+ ******************************/
+function extractSpreadsheetIdFromUrl_(url) {
+  const match = String(url || "").match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+
+  if (!match || !match[1]) {
+    throw new Error("スプレッドシートURLからIDを取得できませんでした。");
+  }
+
+  return match[1];
+}
+
+
+/******************************
+ * GoogleスプレッドシートURLから文字を読み取り
+ ******************************/
+function extractTextFromGoogleSpreadsheetUrl_(url) {
+  const spreadsheetId = extractSpreadsheetIdFromUrl_(url);
+
+  let ss;
+
+  try {
+    ss = SpreadsheetApp.openById(spreadsheetId);
+  } catch (err) {
+    throw new Error(
+      "スプレッドシートを開けませんでした。\n\n" +
+      "原因として、下記が考えられます。\n" +
+      "・URLが間違っている\n" +
+      "・このGASの実行アカウントに閲覧権限がない\n" +
+      "・共有設定が限定されている\n\n" +
+      "元エラー：" + err.message
+    );
+  }
+
+  const sheets = ss.getSheets();
+
+  let text = "";
+
+  sheets.forEach(sheet => {
+    const values = sheet.getDataRange().getDisplayValues();
+
+    text += "\n\n--- シート名: " + sheet.getName() + " ---\n";
+
+    values.forEach(row => {
+      const line = row
+        .map(v => String(v || "").trim())
+        .filter(v => v !== "")
+        .join(" / ");
+
+      if (line) {
+        text += line + "\n";
+      }
+    });
+  });
+
+  if (!text.trim()) {
+    throw new Error("スプレッドシートから文字を読み取れませんでした。");
+  }
+
+  return text;
+}
+
+
+
+/******************************
+ * OpenAI API呼び出し リトライ付き
+ ******************************/
+function callOpenAIResponsesWithRetry_(payload, label) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("OPENAI_API_KEY");
+
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY が設定されていません。");
+  }
+
+  const url = "https://api.openai.com/v1/responses";
+
+  let lastErrorText = "";
+
+  for (let i = 1; i <= 3; i++) {
+    const res = UrlFetchApp.fetch(url, {
+      method: "post",
+      contentType: "application/json",
+      headers: {
+        Authorization: "Bearer " + apiKey
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    const code = res.getResponseCode();
+    const body = res.getContentText();
+
+    if (code >= 200 && code < 300) {
+      return JSON.parse(body);
+    }
+
+    lastErrorText =
+      label + "エラー: " + code + "\n" +
+      body + "\n\n" +
+      "リトライ回数：" + i + "/3";
+
+    // 500系・429は少し待って再試行
+    if (code === 429 || code >= 500) {
+      Utilities.sleep(1500 * i);
+      continue;
+    }
+
+    // 400系はリトライしても直らないことが多いので即終了
+    throw new Error(lastErrorText);
+  }
+
+  throw new Error(lastErrorText);
+}
+
+/******************************
+ * PDFをAIで読み取り
+ ******************************/
+function extractSkillDataByAIPdf_(blob, fileName) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("OPENAI_API_KEY");
+
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY が設定されていません。");
+  }
+
+  const base64 = Utilities.base64Encode(blob.getBytes());
+
+  const payload = {
+    model: CONFIG.openaiModel,
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: makeExtractPrompt_()
+          },
+          {
+            type: "input_file",
+            filename: fileName,
+            file_data: "data:application/pdf;base64," + base64
+          }
+        ]
+      }
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "skill_sheet_extract_multiple",
+        schema: getSkillSchema_(),
+        strict: true
+      }
+    }
+  };
+
+  const json = callOpenAIResponsesWithRetry_(payload, "AI読み取り");
+  const outputText = getOpenAIOutputText_(json);
+
+  return JSON.parse(outputText);
+}
+
+
+/******************************
+ * 画像をAIで読み取り
+ ******************************/
+function extractSkillDataByAIImage_(blob, fileName) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("OPENAI_API_KEY");
+
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY が設定されていません。");
+  }
+
+  const base64 = Utilities.base64Encode(blob.getBytes());
+
+  const payload = {
+    model: CONFIG.openaiModel,
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: makeExtractPrompt_()
+          },
+          {
+            type: "input_image",
+            image_url: "data:image/jpeg;base64," + base64
+          }
+        ]
+      }
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "skill_sheet_extract_multiple",
+        schema: getSkillSchema_(),
+        strict: true
+      }
+    }
+  };
+
+  const json = callOpenAIResponsesWithRetry_(payload, "画像AI読み取り");
+  const outputText = getOpenAIOutputText_(json);
+
+  return JSON.parse(outputText);
+}
+
+
+/******************************
+ * Excelテキスト / LINE文章をAIで読み取り
+ ******************************/
+function extractSkillDataByAIText_(text) {
+  let safeText = String(text || "");
+
+  // ExcelやスプレッドシートURLの読み取り結果が大きすぎる場合の保険
+  if (safeText.length > 120000) {
+    safeText = safeText.slice(0, 120000);
+  }
+
+  const prompt = makeExtractPrompt_() + "\n\n以下の文章から抽出してください。\n\n" + safeText;
+
+  const payload = {
+    model: CONFIG.openaiModel,
+    input: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: prompt
+          }
+        ]
+      }
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "skill_sheet_extract_multiple",
+        schema: getSkillSchema_(),
+        strict: true
+      }
+    }
+  };
+
+  const json = callOpenAIResponsesWithRetry_(payload, "AI読み取り");
+  const outputText = getOpenAIOutputText_(json);
+
+  return JSON.parse(outputText);
+}
+
+
+
+/******************************
+ * AIへの指示文
+ ******************************/
+function makeExtractPrompt_() {
+  return `
+あなたはSES人材・販売スタッフ・イベントスタッフ等のスキル情報を読み取る担当者です。
+PDF、Excel、画像、Googleスプレッドシート、またはLINEに貼り付けられた文章から、Googleスプレッドシート登録用に必要事項を抽出してください。
+
+必ずJSONのみで返してください。
+必ず people 配列で返してください。
+1名だけの場合も people 配列に1件だけ入れてください。
+複数名が記載されている場合は、1人ずつ分けて people に入れてください。
+
+返却形式:
+{
+  "people": [
+    {
+      "tantousha": "",
+      "name": "",
+      "prefecture": "",
+      "nearest_station": "",
+      "proposal_company": "",
+      "price": "",
+      "career": "",
+      "experience": "",
+      "start_date": "",
+      "move_type": "",
+      "remarks": ""
+    }
+  ]
+}
+
+抽出したい項目:
+- 担当者
+- 名前
+- 都道府県
+- 最寄駅
+- 提案元会社
+- 希望単価
+- キャリア
+- 経験値
+- 開始希望
+- 移動型可否
+- 備考
+
+重要ルール:
+- 1行に1名ずつ並んでいる表形式の場合は、必ず行ごとに1名として分けてください。
+- 同じ提案元会社、担当者、開始希望、単価が複数名に共通している場合は、それぞれの人に同じ値を入れてください。
+- 表の列順から判断できる場合は、列の意味を推測して抽出してください。
+- 名前が空の行、見出し行、タイトル行、空行は people に入れないでください。
+- 「確認中」と書かれている項目は、そのまま「確認中」と返してください。
+- 不明な項目は空文字にしてください。
+
+判断ルール:
+- 担当者は「担当者」「人員担当者」「案件担当者」「営業担当」などに記載がある場合に抽出してください。
+- 担当者が不明な場合は空文字にしてください。
+- 名前は人名のみを入れてください。
+- 都道府県は「愛知県」「大阪府」「東京都」などを入れてください。
+- 都道府県が不明な場合でも、最寄駅から推測できそうな場合は推測してください。
+- 最寄駅は「名古屋駅」「金山駅」「西二見駅」など駅名を入れてください。
+- 提案元会社が書類または文章内にない場合は空文字にしてください。
+- 希望単価が書類または文章内にない場合は空文字にしてください。
+- 希望単価は記載があれば抽出してください。例: 20000別、65万円、25,000円、確認中
+- 「交通費別」「交通費別途」「交通費別で」と書いてある場合は、必ず「別」にしてください。例：23000交通費別 → 23000別
+- 「交通費込み」「交通費込」と書いてある場合は「込」にしてください。
+- 「別途」は「別」に統一してください。
+
+- キャリアは必ず次のどれかで返してください：「SB/Y」「au/UQ」「docomo」「楽天」
+- ソフトバンク、SoftBank、SB、ワイモバイル、Y!mobile、Yモバイル、Ymobile の経験がある場合は「SB/Y」にしてください。
+- au、UQ、UQ mobile、UQモバイル の経験がある場合は「au/UQ」にしてください。
+- docomo、ドコモ、NTTドコモ の経験がある場合は「docomo」にしてください。
+- 楽天、楽天モバイル、Rakuten の経験がある場合は「楽天」にしてください。
+- 上記キャリアが明確に書かれていない場合は、推測せず空文字にしてください。
+
+- 経験値は必ず次のどれかで返してください：
+  「通信経験者」「通信未経験」「通信微経験」「コール経験者」「コール未経験」
+
+- 携帯販売、通信、ショップ、携帯ショップ、量販店、イベント、キャッチ、販売スタッフ経験がある場合は「通信経験者」にしてください。
+- 通信経験が少しだけある場合は「通信微経験」にしてください。
+- コールセンター、受電、架電、テレアポ経験がある場合は「コール経験者」にしてください。
+- コールセンター未経験の場合は「コール未経験」にしてください。
+- 通信・携帯販売・イベント経験がない場合は「通信未経験」にしてください。
+
+- 開始希望は、書類や文章に記載されている表記をできるだけそのまま返してください。
+- 「7月」と記載がある場合は、勝手に「7/1」や「7月1日」に変換せず、必ず「7月」と返してください。
+- 「即日」と記載がある場合は「即日」と返してください。
+- 「7/1」「7月1日」と明確に日付まで書かれている場合のみ、その表記に合わせて返してください。
+- 開始希望が不明な場合は空文字にしてください。
+
+- 移動型可否は、必ず「移動型可否」「移動型」「移動可否」「移動型対応」などの項目名が明確にある場合のみ抽出してください。
+- 「通勤可能」「対応可能」「相談可能」「ご相談可能」「通勤時間1時間圏内希望」だけでは、移動型可否を判断しないでください。
+- 移動型可否の項目名がない場合は、推測せず必ず空文字にしてください。
+- 備考欄や条件欄に「相談可能」「対応可能」と書かれていても、移動型可否には反映しないでください。
+- 「移動型可否：○」「移動型：可」「移動型対応：可能」と明記がある場合のみ「○」にしてください。
+- 「移動型可否：×」「移動型：不可」「移動型対応：不可」と明記がある場合のみ「×」にしてください。
+- 「移動型可否：距離次第」「移動型：距離次第」「移動型対応：要相談」と明記がある場合のみ「距離次第」にしてください。
+
+- 備考には、補足情報・注意点・資格・稼働条件・特記事項などがあれば短く入れてください。
+`;
+}
+
+
+/******************************
+ * JSONスキーマ 複数名対応
+ ******************************/
+function getSkillSchema_() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      people: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            tantousha: { type: "string" },
+            name: { type: "string" },
+            prefecture: { type: "string" },
+            nearest_station: { type: "string" },
+            proposal_company: { type: "string" },
+            price: { type: "string" },
+            career: { type: "string" },
+            experience: { type: "string" },
+            start_date: { type: "string" },
+            move_type: { type: "string" },
+            remarks: { type: "string" }
+          },
+          required: [
+            "tantousha",
+            "name",
+            "prefecture",
+            "nearest_station",
+            "proposal_company",
+            "price",
+            "career",
+            "experience",
+            "start_date",
+            "move_type",
+            "remarks"
+          ]
+        }
+      }
+    },
+    required: [
+      "people"
+    ]
+  };
+}
+
+
+/******************************
+ * AIレスポンスからテキスト抽出
+ ******************************/
+function getOpenAIOutputText_(json) {
+  if (json.output_text) {
+    return json.output_text;
+  }
+
+  if (!json.output) {
+    throw new Error("AIレスポンス形式が不明です。");
+  }
+
+  let text = "";
+
+  json.output.forEach(item => {
+    if (item.content) {
+      item.content.forEach(c => {
+        if (c.type === "output_text" && c.text) {
+          text += c.text;
+        }
+      });
+    }
+  });
+
+  if (!text) {
+    throw new Error("AIの出力テキストを取得できませんでした。");
+  }
+
+  return text;
+}
+
+
+/******************************
+ * 複数名データ整形
+ ******************************/
+function normalizeSkillDataList_(data) {
+  let list = [];
+
+  if (data && Array.isArray(data.people)) {
+    list = data.people;
+  } else if (Array.isArray(data)) {
+    list = data;
+  } else if (data) {
+    list = [data];
+  }
+
+  list = list
+    .map(person => normalizeSkillData_(person))
+    .filter(person => {
+      return person.name || person.nearest_station || person.prefecture || person.proposal_company;
+    });
+
+  if (list.length === 0) {
+    throw new Error("読み取れる人物データがありませんでした。");
+  }
+
+  return list;
+}
+
+
+/******************************
+ * 1名分データ整形
+ ******************************/
+function normalizeSkillData_(data) {
+  data = data || {};
+
+  const value = (v, defaultValue) => {
+    if (v && String(v).trim() !== "") {
+      return String(v).trim();
+    }
+    return defaultValue;
+  };
+
+  let remarks = value(data.remarks, "");
+
+  if (data.drive_file_url && !remarks.includes(data.drive_file_url)) {
+    remarks = remarks
+      ? remarks + " / 原本URL：" + data.drive_file_url
+      : "原本URL：" + data.drive_file_url;
+  }
+
+  const rawCareer = value(data.career, "");
+  const career = normalizeCareerValue_(rawCareer, remarks);
+
+  const rawExperience = value(data.experience, "");
+  const rawMoveType = value(data.move_type, "");
+
+  const nearestStation = normalizeNearestStationValue_(value(data.nearest_station, ""));
+
+  let prefecture = value(data.prefecture, "");
+
+  {
+    const guessedPrefecture = guessPrefectureFromStation_(nearestStation, prefecture);
+
+    if (guessedPrefecture) {
+      prefecture = guessedPrefecture;
+    }
+  }
+
+  return {
+    tantousha: normalizeAllowedStaffValue_(value(data.tantousha, "")),
+    name: value(data.name, ""),
+    prefecture: prefecture,
+    nearest_station: nearestStation,
+    proposal_company: value(data.proposal_company, ""),
+    price: normalizePriceValue_(value(data.price, "")),
+    career: career,
+    experience: normalizeExperienceValue_(rawExperience, career, remarks),
+    start_date: normalizeStartDateValue_(value(data.start_date, "")),
+    move_type: normalizeMoveTypeValue_(rawMoveType),
+    remarks: remarks,
+
+    register_sheet: normalizeRegisterSheetName_(data.register_sheet || ""),
+
+    drive_file_id: data.drive_file_id || "",
+    drive_file_url: data.drive_file_url || "",
+    drive_region_name: data.drive_region_name || ""
+  };
+}
+
+
+
+
+
+/******************************
+ * 最寄駅の表記を整える
+ * 「小平」→「小平駅」
+ ******************************/
+function normalizeNearestStationValue_(station) {
+  let value = String(station || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  // 余計なスペースを削除
+  value = value.replace(/\s+/g, "");
+
+  // すでに駅で終わる場合はそのまま
+  if (value.endsWith("駅")) {
+    return value;
+  }
+
+  return value + "駅";
+}
+
+/******************************
+ * 開始希望を整える
+ ******************************/
+function normalizeStartDateValue_(startDate) {
+  const value = String(startDate || "").trim();
+
+  if (!value || value === "確認中" || value === "不明" || value === "未記載") {
+    return "";
+  }
+
+  const slashMatch = value.match(/^0?([1-9]|1[0-2])\/0?1$/);
+
+  if (slashMatch) {
+    return slashMatch[1] + "月";
+  }
+
+  const jpDayMatch = value.match(/^0?([1-9]|1[0-2])月0?1日$/);
+
+  if (jpDayMatch) {
+    return jpDayMatch[1] + "月";
+  }
+
+  return value;
+}
+
+
+/******************************
+ * 登録先をシート名に合わせる
+ ******************************/
+function normalizeRegisterSheetName_(value) {
+  const text = String(value || "").trim();
+
+  if (!text) return "";
+
+  if (
+    text === "東海" ||
+    text === "関西" ||
+    text === "関東" ||
+    text === "九州" ||
+    text === "その他" ||
+    text === "リモート"
+  ) {
+    return text;
+  }
+
+  if (text.includes("東海")) return "東海";
+  if (text.includes("関西")) return "関西";
+  if (text.includes("関東")) return "関東";
+  if (text.includes("九州")) return "九州";
+  if (text.includes("その他")) return "その他";
+  if (text.includes("リモート")) return "リモート";
+
+  return "";
+}
+
+
+/******************************
+ * 移動型可否をシートのプルダウンに合わせる
+ * 基本は空欄
+ ******************************/
+function normalizeMoveTypeValue_(moveType) {
+  const value = String(moveType || "").trim();
+
+  if (
+    value === "" ||
+    value === "確認中" ||
+    value === "不明" ||
+    value === "未記載" ||
+    value === "記載なし" ||
+    value === "なし"
+  ) {
+    return "";
+  }
+
+  if (value === "○" || value === "〇") {
+    return "○";
+  }
+
+  if (value === "×" || value === "✕" || value === "不可") {
+    return "×";
+  }
+
+  if (value === "距離次第") {
+    return "距離次第";
+  }
+
+  if (
+    value.includes("相談可能") ||
+    value.includes("ご相談可能") ||
+    value.includes("対応可能") ||
+    value.includes("通勤可能") ||
+    value.includes("通勤時間") ||
+    value.includes("1時間圏内")
+  ) {
+    return "";
+  }
+
+  if (
+    !value.includes("移動型") &&
+    !value.includes("移動可否") &&
+    !value.includes("移動対応")
+  ) {
+    return "";
+  }
+
+  if (
+    value.includes("距離次第") ||
+    value.includes("場所次第") ||
+    value.includes("エリア次第") ||
+    value.includes("要相談") ||
+    value.includes("応相談")
+  ) {
+    return "距離次第";
+  }
+
+  if (
+    value.includes("不可") ||
+    value.includes("できない") ||
+    value.includes("NG")
+  ) {
+    return "×";
+  }
+
+  if (
+    value.includes("可能") ||
+    value.includes("可") ||
+    value.includes("対応可")
+  ) {
+    return "○";
+  }
+
+  return "";
+}
+
+
+/******************************
+ * 最寄駅から都道府県を推測
+ ******************************/
+function guessPrefectureFromStation_(station, currentPrefecture) {
+  const normalizedStation = normalizeStationKey_(station);
+  if (!normalizedStation) return "";
+
+  const current = String(currentPrefecture || "").trim();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = "STATION_PREF_" + Utilities.base64EncodeWebSafe(normalizedStation).slice(0, 180);
+  const cached = cache.get(cacheKey);
+
+  if (cached) {
+    const candidates = JSON.parse(cached);
+    return chooseStationPrefecture_(candidates, current);
+  }
+
+  const sheet = SpreadsheetApp
+    .getActiveSpreadsheet()
+    .getSheetByName(CONFIG.stationMasterSheetName || "駅マスタ");
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    console.log("駅マスタが見つからないため、都道府県の自動補正をスキップします。");
+    return current;
+  }
+
+  // A列：駅名、D列：都道府県を一括取得。getValueの繰り返しは行わない。
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getDisplayValues();
+  const candidates = [];
+
+  rows.forEach(row => {
+    if (normalizeStationKey_(row[0]) === normalizedStation && row[3]) {
+      candidates.push(String(row[3]).trim());
+    }
+  });
+
+  const uniqueCandidates = [...new Set(candidates)];
+  cache.put(cacheKey, JSON.stringify(uniqueCandidates), 21600);
+
+  return chooseStationPrefecture_(uniqueCandidates, current);
+}
+
+function normalizeStationKey_(station) {
+  return String(station || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/駅$/g, "")
+    .trim();
+}
+
+function chooseStationPrefecture_(candidates, currentPrefecture) {
+  const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+  const current = String(currentPrefecture || "").trim();
+
+  if (list.length === 1) {
+    // 駅マスタで一意なら、AIの誤判定より駅マスタを優先する。
+    return list[0];
+  }
+
+  if (current && list.includes(current)) {
+    return current;
+  }
+
+  // 同名駅で判断できない場合は、誤った県を勝手に確定しない。
+  return current;
+}
+
+
+
+/******************************
+ * 希望単価を整える
+ * 交通費別 / 交通費別途 / 交通費別で → 別 に統一
+ ******************************/
+function normalizePriceValue_(price) {
+  let value = String(price || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  value = value.replace(/\s+/g, "");
+  value = value.replace(/円/g, "");
+
+  // 23,000 → 23000
+  value = value.replace(/,/g, "");
+
+  // 交通費別の表記を「別」に統一
+  value = value.replace(/交通費別途/g, "別");
+  value = value.replace(/交通費別で/g, "別");
+  value = value.replace(/交通費別/g, "別");
+  value = value.replace(/交通費は別/g, "別");
+  value = value.replace(/交通費別支給/g, "別");
+  value = value.replace(/交通費込み/g, "込");
+  value = value.replace(/交通費込/g, "込");
+
+  // 「別途」は「別」に統一
+  value = value.replace(/別途/g, "別");
+
+  // 23000別別 のような重複を防ぐ
+  value = value.replace(/別別+/g, "別");
+  value = value.replace(/込込+/g, "込");
+
+  return value;
+}
+
+/******************************
+ * キャリアをシートのプルダウンに合わせる
+ ******************************/
+function normalizeCareerValue_(career, remarks) {
+  const text = [
+    career || "",
+    remarks || ""
+  ].join(" ");
+
+  const allowed = [
+    "SB/Y",
+    "au/UQ",
+    "docomo",
+    "楽天"
+  ];
+
+  const trimmedCareer = String(career || "").trim();
+
+  if (allowed.includes(trimmedCareer)) {
+    return trimmedCareer;
+  }
+
+  if (
+    text.includes("ソフトバンク") ||
+    text.includes("SoftBank") ||
+    text.includes("softbank") ||
+    text.includes("SB") ||
+    text.includes("ワイモバイル") ||
+    text.includes("Y!mobile") ||
+    text.includes("Ymobile") ||
+    text.includes("Yモバイル")
+  ) {
+    return "SB/Y";
+  }
+
+  if (
+    text.includes("au") ||
+    text.includes("AU") ||
+    text.includes("UQ") ||
+    text.includes("UQ mobile") ||
+    text.includes("UQモバイル")
+  ) {
+    return "au/UQ";
+  }
+
+  if (
+    text.includes("docomo") ||
+    text.includes("DOCOMO") ||
+    text.includes("ドコモ") ||
+    text.includes("NTTドコモ")
+  ) {
+    return "docomo";
+  }
+
+  if (
+    text.includes("楽天") ||
+    text.includes("楽天モバイル") ||
+    text.includes("Rakuten") ||
+    text.includes("rakuten")
+  ) {
+    return "楽天";
+  }
+
+  return "";
+}
+
+
+/******************************
+ * 経験値をシートのプルダウンに合わせる
+ ******************************/
+function normalizeExperienceValue_(experience, career, remarks) {
+  const text = [
+    experience || "",
+    career || "",
+    remarks || ""
+  ].join(" ");
+
+  const allowed = [
+    "通信経験者",
+    "通信未経験",
+    "通信微経験",
+    "コール経験者",
+    "コール未経験"
+  ];
+
+  if (allowed.includes(String(experience).trim())) {
+    return String(experience).trim();
+  }
+
+  if (
+    text.includes("コール") ||
+    text.includes("テレアポ") ||
+    text.includes("架電") ||
+    text.includes("受電")
+  ) {
+    if (
+      text.includes("未経験") ||
+      text.includes("経験なし") ||
+      text.includes("なし")
+    ) {
+      return "コール未経験";
+    }
+
+    return "コール経験者";
+  }
+
+  if (
+    text.includes("携帯") ||
+    text.includes("通信") ||
+    text.includes("ショップ") ||
+    text.includes("携帯ショップ") ||
+    text.includes("量販店") ||
+    text.includes("イベント") ||
+    text.includes("キャッチ") ||
+    text.includes("販売スタッフ")
+  ) {
+    if (
+      text.includes("未経験") ||
+      text.includes("経験なし") ||
+      text.includes("なし")
+    ) {
+      return "通信未経験";
+    }
+
+    if (
+      text.includes("微経験") ||
+      text.includes("少し") ||
+      text.includes("数ヶ月") ||
+      text.includes("半年未満")
+    ) {
+      return "通信微経験";
+    }
+
+    return "通信経験者";
+  }
+
+  if (
+    text.match(/[0-9０-９]+年/) ||
+    text.match(/[0-9０-９]+ヶ月/) ||
+    text.includes("半年")
+  ) {
+    return "通信経験者";
+  }
+
+  return "通信未経験";
+}
+
+
+/******************************
+ * 登録前の一時保存
+ ******************************/
+function savePendingData_(sessionId, data) {
+  const key = "PENDING_" + sessionId;
+  PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(data));
+}
+
+function getPendingData_(sessionId) {
+  const key = "PENDING_" + sessionId;
+  const value = PropertiesService.getScriptProperties().getProperty(key);
+
+  if (!value) return null;
+
+  return JSON.parse(value);
+}
+
+function clearPendingData_(sessionId) {
+  const key = "PENDING_" + sessionId;
+  PropertiesService.getScriptProperties().deleteProperty(key);
+}
+
+
+/******************************
+ * 不足項目確認 複数名対応
+ ******************************/
+function getMissingRequiredFieldsForPeople_(people) {
+  const missing = [];
+
+  const hasMissingProposalCompany = people.some(person => {
+    return !person.proposal_company ||
+      String(person.proposal_company).trim() === "";
+  });
+
+  const hasMissingPrice = people.some(person => {
+    return !person.price ||
+      String(person.price).trim() === "";
+  });
+
+  const hasMissingStartDate = people.some(person => {
+    const value = String(person.start_date || "").trim();
+
+    return (
+      value === "" ||
+      value === "確認中" ||
+      value === "不明" ||
+      value === "未記載"
+    );
+  });
+
+  if (hasMissingProposalCompany) {
+    missing.push("proposal_company");
+  }
+
+  if (hasMissingPrice) {
+    missing.push("price");
+  }
+
+  if (hasMissingStartDate) {
+    missing.push("start_date");
+  }
+
+  return missing;
+}
+
+
+/******************************
+ * 不足項目の質問文
+ ******************************/
+function makeMissingFieldsQuestionText_(fields) {
+  const lines = [];
+
+  lines.push("読み取れない項目がありました。");
+  lines.push("");
+  lines.push("下記の内容を入力してください。");
+  lines.push("");
+
+  if (fields.includes("proposal_company")) {
+    lines.push("提案元会社：");
+  }
+
+  if (fields.includes("price")) {
+    lines.push("希望単価：");
+  }
+
+  if (fields.includes("start_date")) {
+    lines.push("開始希望：");
+  }
+
+  lines.push("");
+  lines.push("例：");
+
+  if (fields.includes("proposal_company")) {
+    lines.push("提案元会社：WonderCraft");
+  }
+
+  if (fields.includes("price")) {
+    lines.push("希望単価：20000別");
+  }
+
+  if (fields.includes("start_date")) {
+    lines.push("開始希望：8月");
+  }
+
+  lines.push("");
+  lines.push("複数名の場合、空欄の人全員に反映します。");
+  lines.push("入力後、読み取り結果を再表示します。");
+
+  return lines.join("\n");
+}
+
+
+/******************************
+ * 不足項目の回答を反映 複数名対応
+ ******************************/
+function updateRequiredFieldsByTextForPeople_(people, text, waitingFields) {
+  const values = parseCorrectionText_(text);
+
+  people = people.map(person => {
+    if (
+      waitingFields.includes("proposal_company") &&
+      !String(person.proposal_company || "").trim() &&
+      values.proposal_company
+    ) {
+      person.proposal_company = values.proposal_company;
+    }
+
+    if (
+      waitingFields.includes("price") &&
+      !String(person.price || "").trim() &&
+      values.price
+    ) {
+      person.price = values.price;
+    }
+
+    if (
+      waitingFields.includes("start_date") &&
+      !String(person.start_date || "").trim() &&
+      values.start_date
+    ) {
+      person.start_date = values.start_date;
+    }
+
+    return normalizeSkillData_(person);
+  });
+
+  // 不足項目が1つだけの場合は、「8月」など項目名なしの回答も受け付ける
+  if (
+    waitingFields.length === 1 &&
+    !text.includes("：") &&
+    !text.includes(":") &&
+    !text.includes("=")
+  ) {
+    const onlyField = waitingFields[0];
+    const answer = text.trim();
+
+    people = people.map(person => {
+      if (
+        onlyField === "proposal_company" &&
+        !String(person.proposal_company || "").trim()
+      ) {
+        person.proposal_company = answer;
+      }
+
+      if (
+        onlyField === "price" &&
+        !String(person.price || "").trim()
+      ) {
+        person.price = answer;
+      }
+
+      if (
+        onlyField === "start_date" &&
+        !String(person.start_date || "").trim()
+      ) {
+        person.start_date = answer;
+      }
+
+      return normalizeSkillData_(person);
+    });
+  }
+
+  return people;
+}
+
+
+/******************************
+ * 回答待ち項目の保存
+ ******************************/
+function saveWaitingFields_(sessionId, fields) {
+  const key = "WAITING_FIELDS_" + sessionId;
+  PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(fields));
+}
+
+function getWaitingFields_(sessionId) {
+  const key = "WAITING_FIELDS_" + sessionId;
+  const value = PropertiesService.getScriptProperties().getProperty(key);
+
+  if (!value) return [];
+
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    return [];
+  }
+}
+
+function clearWaitingFields_(sessionId) {
+  const key = "WAITING_FIELDS_" + sessionId;
+  PropertiesService.getScriptProperties().deleteProperty(key);
+}
+
+
+/******************************
+ * 確認メッセージ作成 複数名対応
+ ******************************/
+function makeConfirmTextForPeople_(people) {
+  const lines = [];
+
+  lines.push("読み取り結果です。");
+  lines.push("");
+  lines.push("人数：" + people.length + "名");
+
+  people.forEach((person, index) => {
+    const tabName = decideSkillSheetName_(person);
+
+    const value = (v) => {
+      return v && String(v).trim() !== "" ? String(v).trim() : "確認中";
+    };
+
+    const careerValue = person.career && String(person.career).trim() !== ""
+      ? String(person.career).trim()
+      : "";
+
+    lines.push("");
+    lines.push("【" + (index + 1) + "人目】");
+    lines.push("登録先：" + tabName);
+    lines.push("担当者：" + value(person.tantousha));
+    lines.push("名前：" + value(person.name));
+    lines.push("都道府県：" + value(person.prefecture));
+    lines.push("最寄駅：" + value(person.nearest_station));
+    lines.push("提案元会社：" + value(person.proposal_company));
+    lines.push("希望単価：" + value(person.price));
+    lines.push("キャリア：" + careerValue);
+    lines.push("経験値：" + value(person.experience));
+    lines.push("開始希望：" + value(person.start_date));
+    lines.push("移動型可否：" + (person.move_type || ""));
+    lines.push("備考：" + value(person.remarks));
+  });
+
+  lines.push("");
+  lines.push("この内容で全員登録する場合は「はい」と送ってください。");
+  lines.push("修正する場合は、下記の形式で送ってください。");
+  lines.push("");
+  lines.push("修正");
+  lines.push("1人目");
+  lines.push("希望単価：20000別");
+  lines.push("");
+  lines.push("または全員共通で修正する場合は");
+  lines.push("");
+  lines.push("修正");
+  lines.push("提案元会社：WonderCraft");
+
+  return lines.join("\n");
+}
+
+
+
+
+
+/******************************
+ * 登録完了返信フォーマット
+ ******************************/
+function makeRegisteredReplyText_(people) {
+  const blocks = people.map(person => makeRegisteredPersonFormat_(person));
+  return blocks.join("\n\n");
+}
+
+
+/******************************
+ * 登録完了返信 1名分
+ ******************************/
+function makeRegisteredPersonFormat_(person) {
+  const nearestStation = person.nearest_station || "";
+  const prefecture = person.prefecture || "";
+  const stationLine = nearestStation
+    ? nearestStation + (prefecture ? "（" + prefecture + "）" : "")
+    : (prefecture ? "（" + prefecture + "）" : "");
+
+  return [
+    "提案いただけそうな案件お持ちの方は弊社担当まで直接お問い合わせください。",
+    "",
+    "【最寄り駅】" + stationLine,
+    "【希望職種】" + makeDesiredJobText_(person),
+    "【経歴及びスキル】" + makeCareerSkillText_(person),
+    "【通勤可能時間】" + makeCommuteTimeText_(person),
+    "【希望開始時】" + (person.start_date || ""),
+    "【希望単価】" + makeReplyPriceText_(person.price || "")
+  ].join("\n");
+}
+
+
+/******************************
+ * 希望職種の表示
+ ******************************/
+function makeDesiredJobText_(person) {
+  const experience = String(person.experience || "");
+  const career = String(person.career || "");
+  const remarks = String(person.remarks || "");
+
+  if (
+    experience.includes("コール") ||
+    remarks.includes("コール") ||
+    remarks.includes("テレアポ") ||
+    remarks.includes("架電") ||
+    remarks.includes("受電")
+  ) {
+    return "コール";
+  }
+
+  return "通信";
+}
+
+
+/******************************
+ * 経歴及びスキルの表示
+ ******************************/
+function makeCareerSkillText_(person) {
+  const career = String(person.career || "");
+  const experience = String(person.experience || "");
+  const remarks = String(person.remarks || "");
+  const source = [career, remarks].join(" ");
+  const results = [];
+
+  if (/SB\/Y|ソフトバンク|SoftBank|ワイモバイル|Y!mobile|Yモバイル|Ymobile/i.test(source)) {
+    results.push("SB経験者");
+  }
+
+  if (/docomo|ドコモ|NTTドコモ/i.test(source)) {
+    results.push("ドコモ経験者");
+  }
+
+  if (/au\/UQ|(?:^|[^a-z])au(?:[^a-z]|$)|UQ|UQ mobile|UQモバイル/i.test(source)) {
+    results.push("au経験者");
+  }
+
+  if (/楽天|楽天モバイル|Rakuten/i.test(source)) {
+    results.push("楽天経験者");
+  }
+
+  if (results.length > 0) {
+    return [...new Set(results)].join("、");
+  }
+
+  if (experience === "通信未経験") return "通信未経験";
+  if (experience === "通信微経験") return "通信微経験";
+  if (experience === "通信経験者") return "通信経験者";
+  if (experience === "コール経験者") return "コール経験者";
+  if (experience === "コール未経験") return "コール未経験";
+
+  return remarks || "";
+}
+
+
+/******************************
+ * 通勤可能時間の表示
+ ******************************/
+function makeCommuteTimeText_(person) {
+  const remarks = String(person.remarks || "");
+
+  const minuteMatch = remarks.match(/([0-9０-９]+)\s*分/);
+  if (minuteMatch) {
+    return toHalfWidthNumber_(minuteMatch[1]) + "分";
+  }
+
+  const hourMatch = remarks.match(/([0-9０-９]+)\s*時間/);
+  if (hourMatch) {
+    const hour = Number(toHalfWidthNumber_(hourMatch[1]));
+    if (!isNaN(hour)) {
+      return String(hour * 60) + "分";
+    }
+  }
+
+  // 記載がない場合の標準表示
+  return "60分";
+}
+
+
+/******************************
+ * 登録完了返信用の単価表示
+ ******************************/
+function makeReplyPriceText_(price) {
+  let value = normalizePriceValue_(price);
+
+  if (!value) {
+    return "";
+  }
+
+  if (!value.endsWith("〜") && !value.endsWith("～")) {
+    value += "〜";
+  }
+
+  return value;
+}
+
+/******************************
+ * 登録完了サマリー
+ ******************************/
+function makeRegisteredSummaryText_(people) {
+  const lines = [];
+
+  people.forEach((person, index) => {
+    lines.push(
+      "【" + (index + 1) + "人目】" +
+      (person.name || "名前未入力") +
+      " / " +
+      decideSkillSheetName_(person)
+    );
+  });
+
+  return lines.join("\n");
+}
+
+
+/******************************
+ * 修正文パース
+ ******************************/
+function parseCorrectionText_(text) {
+  const map = {
+    "登録先": "register_sheet",
+    "登録シート": "register_sheet",
+    "シート": "register_sheet",
+
+    "担当者": "tantousha",
+    "人員担当者": "tantousha",
+    "案件担当者": "tantousha",
+    "営業担当": "tantousha",
+
+    "名前": "name",
+    "都道府県": "prefecture",
+    "最寄駅": "nearest_station",
+    "提案元会社": "proposal_company",
+    "会社": "proposal_company",
+    "提案会社": "proposal_company",
+    "希望単価": "price",
+    "単価": "price",
+    "キャリア": "career",
+    "経験値": "experience",
+    "開始希望": "start_date",
+    "勤務形態": "move_type",
+    "移動型可否": "move_type",
+    "移動型品": "move_type",
+    "備考": "remarks"
+  };
+
+  const result = {};
+  const lines = text.split("\n");
+
+  lines.forEach(line => {
+    let cleanLine = line.trim();
+
+    if (!cleanLine) return;
+
+    cleanLine = cleanLine.replace(/^修正\s*/, "");
+    cleanLine = cleanLine.replace(/^[0-9０-９]+人目\s*/, "");
+
+    const match = cleanLine.match(/^(.+?)[=：:](.+)$/);
+
+    if (!match) return;
+
+    const label = match[1].trim();
+    const value = match[2].trim();
+
+    const key = map[label];
+
+    if (key) {
+      result[key] = value;
+    }
+  });
+
+  return result;
+}
+
+
+/******************************
+ * 読み取り結果の手動修正 複数名対応
+ ******************************/
+function updatePendingPeopleByText_(people, text) {
+  const lines = text.split("\n");
+
+  let targetIndex = null;
+  const grouped = {};
+  const commonLines = [];
+
+  lines.forEach(line => {
+    const cleanLine = line.trim();
+
+    if (!cleanLine || cleanLine === "修正") return;
+
+    const personMatch = cleanLine.match(/^([0-9０-９]+)人目$/);
+
+    if (personMatch) {
+      targetIndex = Number(toHalfWidthNumber_(personMatch[1])) - 1;
+      if (!grouped[targetIndex]) grouped[targetIndex] = [];
+      return;
+    }
+
+    if (targetIndex !== null) {
+      grouped[targetIndex].push(cleanLine);
+    } else {
+      commonLines.push(cleanLine);
+    }
+  });
+
+  // 全員共通修正
+  if (commonLines.length > 0) {
+    const commonValues = parseCorrectionText_(commonLines.join("\n"));
+
+    people = people.map(person => {
+      Object.keys(commonValues).forEach(key => {
+        person[key] = commonValues[key];
+      });
+
+      return normalizeSkillData_(person);
+    });
+  }
+
+  // 個別修正
+  Object.keys(grouped).forEach(indexText => {
+    const index = Number(indexText);
+
+    if (!people[index]) return;
+
+    const values = parseCorrectionText_(grouped[index].join("\n"));
+
+    Object.keys(values).forEach(key => {
+      people[index][key] = values[key];
+    });
+
+    people[index] = normalizeSkillData_(people[index]);
+  });
+
+  return people.map(person => normalizeSkillData_(person));
+}
+
+
+/******************************
+ * 全角数字を半角に変換
+ ******************************/
+function toHalfWidthNumber_(text) {
+  return String(text || "").replace(/[０-９]/g, function(s) {
+    return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
+  });
+}
+
+
+/******************************
+ * 地域タブ判定
+ ******************************/
+function decideSkillSheetName_(data) {
+  const manualSheet = normalizeRegisterSheetName_(data.register_sheet || "");
+
+  if (manualSheet) {
+    return manualSheet;
+  }
+
+  let pref = data.prefecture || "";
+  const move = data.move_type || "";
+  const station = data.nearest_station || "";
+
+  if (!pref || pref === "確認中") {
+    const guessedPrefecture = guessPrefectureFromStation_(station);
+
+    if (guessedPrefecture) {
+      pref = guessedPrefecture;
+    }
+  }
+
+  const fullText = pref + " " + move + " " + station;
+
+  if (
+    fullText.includes("フルリモート") ||
+    fullText.includes("リモート") ||
+    fullText.includes("在宅")
+  ) {
+    return CONFIG.skillSheetNames.remote;
+  }
+
+  if (
+    pref.includes("東京都") ||
+    pref.includes("東京") ||
+    pref.includes("神奈川県") ||
+    pref.includes("神奈川") ||
+    pref.includes("千葉県") ||
+    pref.includes("千葉") ||
+    pref.includes("埼玉県") ||
+    pref.includes("埼玉") ||
+    pref.includes("茨城県") ||
+    pref.includes("茨城") ||
+    pref.includes("栃木県") ||
+    pref.includes("栃木") ||
+    pref.includes("群馬県") ||
+    pref.includes("群馬")
+  ) {
+    return CONFIG.skillSheetNames.kanto;
+  }
+
+  if (
+    pref.includes("愛知県") ||
+    pref.includes("愛知") ||
+    pref.includes("岐阜県") ||
+    pref.includes("岐阜") ||
+    pref.includes("三重県") ||
+    pref.includes("三重") ||
+    pref.includes("静岡県") ||
+    pref.includes("静岡")
+  ) {
+    return CONFIG.skillSheetNames.tokai;
+  }
+
+  if (
+    pref.includes("大阪府") ||
+    pref.includes("大阪") ||
+    pref.includes("京都府") ||
+    pref.includes("京都") ||
+    pref.includes("兵庫県") ||
+    pref.includes("兵庫") ||
+    pref.includes("奈良県") ||
+    pref.includes("奈良") ||
+    pref.includes("滋賀県") ||
+    pref.includes("滋賀") ||
+    pref.includes("和歌山県") ||
+    pref.includes("和歌山")
+  ) {
+    return CONFIG.skillSheetNames.kansai;
+  }
+
+  if (
+    pref.includes("福岡県") ||
+    pref.includes("福岡") ||
+    pref.includes("佐賀県") ||
+    pref.includes("佐賀") ||
+    pref.includes("長崎県") ||
+    pref.includes("長崎") ||
+    pref.includes("熊本県") ||
+    pref.includes("熊本") ||
+    pref.includes("大分県") ||
+    pref.includes("大分") ||
+    pref.includes("宮崎県") ||
+    pref.includes("宮崎") ||
+    pref.includes("鹿児島県") ||
+    pref.includes("鹿児島") ||
+    pref.includes("沖縄県") ||
+    pref.includes("沖縄")
+  ) {
+    return CONFIG.skillSheetNames.kyushu;
+  }
+
+  return CONFIG.skillSheetNames.other;
+}
+
+
+/******************************
+ * 入力規則を消さずにセル入力
+ ******************************/
+function setCellValueSafe_(sheet, row, col, value) {
+  const range = sheet.getRange(row, col);
+
+  try {
+    range.setValue(value);
+  } catch (err) {
+    console.log(
+      "入力規則に合わない値のため内容をクリアします: row=" +
+      row +
+      " col=" +
+      col +
+      " value=" +
+      value
+    );
+
+    range.clearContent();
+  }
+}
+
+
+
+
+
+/******************************
+ * スキルシート行スタイル強制
+ * 行高さ・文字サイズ・折り返しを必ず固定
+ ******************************/
+function enforceSkillSheetRowStyle_(sheet, startRow, rowCount) {
+  if (!sheet || rowCount <= 0) return;
+
+  // 行高さを40で固定
+  sheet.setRowHeights(startRow, rowCount, 40);
+
+  // A〜N列をまとめて固定
+  sheet.getRange(startRow, 1, rowCount, 14)
+    .setFontSize(16)
+    .setWrap(false)
+    .setVerticalAlignment("middle")
+    .setHorizontalAlignment("center");
+
+  // 備考列だけ左寄せ
+  sheet.getRange(startRow, 14, rowCount, 1)
+    .setFontSize(16)
+    .setWrap(false)
+    .setHorizontalAlignment("left");
+
+  // 日付列は文字列
+  sheet.getRange(startRow, 1, rowCount, 1).setNumberFormat("@");
+  sheet.getRange(startRow, 11, rowCount, 1).setNumberFormat("@");
+
+  // 罫線
+  sheet.getRange(startRow, 1, rowCount, 14).setBorder(
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    "#000000",
+    SpreadsheetApp.BorderStyle.SOLID
+  );
+}
+
+
+
+
+/******************************
+ * テンプレート行の色・プルダウン・罫線を再適用
+ * プルダウンや色が崩れないように、必ず5行目/6行目からコピー
+ ******************************/
+function applySkillTemplateStyle_(sheet, targetRow) {
+  if (!sheet) {
+    throw new Error("シートが取得できません。");
+  }
+
+  const startCol = CONFIG.skillStartCol || 1;
+  const colCount = CONFIG.skillColCount || 14;
+
+  /*
+   * 青・白の交互色を確実に維持するため、
+   * 基本は新規登録行の2行上（同じ背景色の行）をコピーします。
+   *
+   * これにより以下をそのまま引き継ぎます。
+   * ・背景色
+   * ・罫線
+   * ・プルダウンとチップ色
+   * ・表示形式
+   * ・フォントと配置
+   * ・行の高さ
+   */
+  let sourceRow = targetRow - 2;
+
+  // データ行がまだ少ない場合だけ、設定済みテンプレート行を使用
+  if (sourceRow < 5) {
+    const whiteRow = CONFIG.templateWhiteRow || 5;
+    const blueRow = CONFIG.templateBlueRow || 6;
+
+    sourceRow =
+      targetRow % 2 === whiteRow % 2
+        ? whiteRow
+        : blueRow;
+  }
+
+  if (sourceRow === targetRow || sourceRow < 1) {
+    throw new Error("書式コピー元の行を判定できませんでした。");
+  }
+
+  const sourceRange = sheet.getRange(sourceRow, startCol, 1, colCount);
+  const targetRange = sheet.getRange(targetRow, startCol, 1, colCount);
+
+  /*
+   * PASTE_NORMALでコピーすることが重要です。
+   * PASTE_FORMATとPASTE_DATA_VALIDATIONを分けると、
+   * Googleスプレッドシートのプルダウンのチップ色や表示形式が
+   * 完全に複製されない場合があります。
+   */
+  sourceRange.copyTo(
+    targetRange,
+    SpreadsheetApp.CopyPasteType.PASTE_NORMAL,
+    false
+  );
+
+  // コピーした値・数式だけを消し、書式・入力規則・チップ色を残す
+  targetRange.clearContent();
+
+  // 行の高さもコピー元と同じにする
+  sheet.setRowHeight(targetRow, sheet.getRowHeight(sourceRow));
+
+  // 日付列のみ文字列表示を維持
+  sheet.getRange(targetRow, 1).setNumberFormat("@");
+  sheet.getRange(targetRow, 11).setNumberFormat("@");
+}
+
+/******************************
+ * スキルシート一覧へ登録
+ * 色・プルダウンは5行目/6行目のテンプレートをコピー
+ * A列は yyyy/MM/dd、更新日K列は M/d の文字列で統一
+ * 行高さ40・文字サイズ16で固定
+ ******************************/
+function appendSkillData_(data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = decideSkillSheetName_(data);
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error("登録先シートが見つかりません: " + sheetName);
+  }
+
+  const inputDateText = Utilities.formatDate(
+    new Date(),
+    "Asia/Tokyo",
+    "yyyy/MM/dd"
+  );
+
+  const updateDateText = Utilities.formatDate(
+    new Date(),
+    "Asia/Tokyo",
+    "M/d"
+  );
+
+  const targetRow = sheet.getLastRow() + 1;
+
+  // 必要なら新しい行を追加
+  if (targetRow > sheet.getMaxRows()) {
+    sheet.insertRowsAfter(
+      sheet.getMaxRows(),
+      targetRow - sheet.getMaxRows()
+    );
+  }
+
+  /*
+   * 値を書き込む前に、2行上の正常な行を丸ごと複製します。
+   * ここで青白交互・罫線・プルダウンのチップ色・行高を保持します。
+   */
+  applySkillTemplateStyle_(sheet, targetRow);
+
+  setCellValueSafe_(sheet, targetRow, 1, inputDateText);
+  setCellValueSafe_(sheet, targetRow, 2, data.tantousha || "");
+  setCellValueSafe_(sheet, targetRow, 3, data.name || "");
+  setCellValueSafe_(sheet, targetRow, 4, data.prefecture || "");
+  setCellValueSafe_(
+    sheet,
+    targetRow,
+    5,
+    normalizeNearestStationValue_(data.nearest_station || "")
+  );
+  setCellValueSafe_(sheet, targetRow, 6, data.proposal_company || "");
+  setCellValueSafe_(sheet, targetRow, 7, data.price || "");
+  setCellValueSafe_(sheet, targetRow, 8, data.career || "");
+  setCellValueSafe_(sheet, targetRow, 9, data.experience || "");
+  setCellValueSafe_(sheet, targetRow, 10, data.start_date || "");
+  setCellValueSafe_(sheet, targetRow, 11, updateDateText);
+  setCellValueSafe_(
+    sheet,
+    targetRow,
+    12,
+    CONFIG.defaultProgress || "案件待ち"
+  );
+  setCellValueSafe_(sheet, targetRow, 13, data.move_type || "");
+  setCellValueSafe_(sheet, targetRow, 14, data.remarks || "");
+
+  /*
+   * 入力後に書式を再コピーしないことが重要です。
+   * 再コピーすると、書き込んだ値やプルダウン表示が崩れる場合があります。
+   */
+  SpreadsheetApp.flush();
+
+  const writtenValues = sheet
+    .getRange(targetRow, 1, 1, CONFIG.skillColCount || 14)
+    .getDisplayValues()[0];
+
+  console.log(
+    "書き込み後データ: " + JSON.stringify(writtenValues)
+  );
+}
+
+
+
+/******************************
+ * LINE返信
+ ******************************/
+function replyLine_(replyToken, text) {
+  const token = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+
+  if (!token) {
+    throw new Error("LINE_CHANNEL_ACCESS_TOKEN が空です。スクリプトプロパティを確認してください。");
+  }
+
+  if (!replyToken) {
+    throw new Error("replyToken が取得できませんでした。");
+  }
+
+  const url = "https://api.line.me/v2/bot/message/reply";
+
+  const payload = {
+    replyToken: replyToken,
+    messages: [
+      {
+        type: "text",
+        text: text
+      }
+    ]
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+
+  if (code < 200 || code >= 300) {
+    throw new Error("LINE返信エラー: " + code + "\n" + body);
+  }
+}
+
+
+/******************************
+ * LINEプッシュ送信
+ ******************************/
+function pushLine_(lineTo, text) {
+  const token = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+
+  if (!token) {
+    throw new Error("LINE_CHANNEL_ACCESS_TOKEN が空です。スクリプトプロパティを確認してください。");
+  }
+
+  if (!lineTo) {
+    throw new Error("送信先IDが取得できませんでした。");
+  }
+
+  const url = "https://api.line.me/v2/bot/message/push";
+
+  const payload = {
+    to: lineTo,
+    messages: [
+      {
+        type: "text",
+        text: text
+      }
+    ]
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+
+  console.log("pushLine送信先: " + lineTo);
+  console.log("pushLineステータス: " + code);
+  console.log("pushLineレスポンス: " + body);
+
+  if (code < 200 || code >= 300) {
+    throw new Error(
+      "LINEプッシュ送信エラー\n" +
+      "送信先ID：" + lineTo + "\n" +
+      "ステータスコード：" + code + "\n\n" +
+      "レスポンス：\n" + body
+    );
+  }
+}
+
+
+
+
+
+/******************************
+ * 崩れた行の色・プルダウン・行高さを一括修正する
+ * GAS画面から手動実行してください
+ ******************************/
+function fixSkillSheetFormatting() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const sheetNames = [
+    CONFIG.skillSheetNames.tokai,
+    CONFIG.skillSheetNames.kansai,
+    CONFIG.skillSheetNames.kanto,
+    CONFIG.skillSheetNames.kyushu,
+    CONFIG.skillSheetNames.other,
+    CONFIG.skillSheetNames.remote
+  ];
+
+  sheetNames.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 7) return;
+
+    /*
+     * 5・6行目は基準行として触らず、
+     * 7行目以降を2行上の同色行から修復します。
+     */
+    for (let row = 7; row <= lastRow; row++) {
+      const values = sheet
+        .getRange(row, 1, 1, CONFIG.skillColCount || 14)
+        .getValues();
+
+      applySkillTemplateStyle_(sheet, row);
+
+      // 書式コピー後に元の値を戻す
+      sheet
+        .getRange(row, 1, 1, CONFIG.skillColCount || 14)
+        .setValues(values);
+    }
+  });
+
+  SpreadsheetApp.flush();
+
+  Logger.log(
+    "全地域シートの青白交互・罫線・プルダウン・チップ色・行高を修復しました。"
+  );
+}
+
+
+
+/******************************
+ * 担当者ごとのLINEメンション表記
+ ******************************/
+function getStaffMentionText_(staffName) {
+  const name = String(staffName || "").trim();
+
+  const mentionMap = {
+    "白木": "@しらき",
+    "長崎": "@ながさき",
+    "森田": "@森田 敬亮",
+    "上澤": "@Kamisawa",
+    "吉本": "@takahiro",
+    "荒井": "@まさき",
+    "山本": "＠山本 恭平",
+    "山田": "@山田"
+  };
+
+  return mentionMap[name] || name;
+}
+
+
+/******************************
+ * 案件進捗 当日面談リマインド
+ * 時間主導トリガーで毎朝実行
+ ******************************/
+function sendTodayProgressReminder() {
+  const grouped = collectTodayInterviewRemindersByStaff_();
+  const staffNames = Object.keys(grouped);
+
+  if (staffNames.length === 0) {
+    console.log("本日の面談予定はありません。");
+    return;
+  }
+
+  const missingStaff = [];
+  const errors = [];
+  let sentCount = 0;
+
+  staffNames.forEach(staffName => {
+    const lineUserId = getLineUserIdByStaffName_(staffName);
+
+    if (!lineUserId) {
+      missingStaff.push(staffName);
+      return;
+    }
+
+    try {
+      const text = makeStaffTodayInterviewReminderText_(
+        staffName,
+        grouped[staffName]
+      );
+
+      pushLine_(lineUserId, text);
+      sentCount++;
+
+    } catch (error) {
+      errors.push(
+        staffName + "：" +
+        (error && error.message ? error.message : String(error))
+      );
+    }
+  });
+
+  console.log("面談リマインド送信担当者数: " + sentCount);
+
+  if (missingStaff.length > 0) {
+    console.log(
+      "担当者マスタにLINEユーザーIDがない担当者: " +
+      missingStaff.join(", ")
+    );
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      "一部の担当者へのLINE送信に失敗しました。\n" +
+      errors.join("\n")
+    );
+  }
+}
+
+function normalizeInterviewDateKey_(rawValue, displayValue) {
+  if (rawValue instanceof Date && !isNaN(rawValue.getTime())) {
+    return Utilities.formatDate(rawValue, "Asia/Tokyo", "yyyy-MM-dd");
+  }
+
+  const text = String(displayValue || rawValue || "")
+    .normalize("NFKC")
+    .trim();
+
+  if (!text) return "";
+
+  const now = new Date();
+  let year = Number(Utilities.formatDate(now, "Asia/Tokyo", "yyyy"));
+  let month = 0;
+  let day = 0;
+
+  let match = text.match(/(20\d{2})[\/\-.年]\s*(\d{1,2})[\/\-.月]\s*(\d{1,2})/);
+  if (match) {
+    year = Number(match[1]);
+    month = Number(match[2]);
+    day = Number(match[3]);
+  } else {
+    match = text.match(/(?:^|\s)(\d{1,2})[\/\-.月]\s*(\d{1,2})(?:日)?(?:\s|$)/);
+    if (!match) return "";
+    month = Number(match[1]);
+    day = Number(match[2]);
+  }
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+  return [year, String(month).padStart(2, "0"), String(day).padStart(2, "0")].join("-");
+}
+
+function formatInterviewValue_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, "Asia/Tokyo", "M/d HH:mm");
+  }
+  return String(value || "");
+}
+
+/******************************
+ * 当日面談リマインド文作成
+ ******************************/
+function makeTodayProgressReminderText_(reminders) {
+  // 旧バージョンとの互換用。
+  return makeStaffTodayInterviewReminderText_("", reminders || []);
+}
+
+
+
+/******************************
+ * 本日の面談を担当者別に抽出
+ ******************************/
+function collectTodayInterviewRemindersByStaff_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.progressSheetName);
+
+  if (!sheet) {
+    throw new Error(
+      "案件進捗シートが見つかりません: " +
+      CONFIG.progressSheetName
+    );
+  }
+
+  const range = sheet.getDataRange();
+  const rawValues = range.getValues();
+  const displayValues = range.getDisplayValues();
+
+  if (rawValues.length < 2) return {};
+
+  // 「名前」「案件進捗」などがある行を見出し行として自動検出。
+  const headerRowIndex = findProgressHeaderRowIndex_(displayValues);
+  const headers = displayValues[headerRowIndex].map(value =>
+    String(value || "").normalize("NFKC").replace(/\s+/g, "").trim()
+  );
+
+  const col = {
+    personStaff: findProgressColumnIndex_(
+      headers,
+      ["人員担当者", "担当者", "人材担当者"],
+      2
+    ),
+    company: findProgressColumnIndex_(
+      headers,
+      ["所属会社名", "所属会社", "会社名"],
+      3
+    ),
+    name: findProgressColumnIndex_(
+      headers,
+      ["名前", "氏名", "求職者名"],
+      4
+    ),
+    projectStaff: findProgressColumnIndex_(
+      headers,
+      ["案件担当者", "営業担当者"],
+      5
+    ),
+    upperCompany: findProgressColumnIndex_(
+      headers,
+      ["上位会社名", "上位会社"],
+      6
+    ),
+    status: findProgressColumnIndex_(
+      headers,
+      ["案件進捗", "進捗", "ステータス"],
+      7
+    ),
+    area: findProgressColumnIndex_(
+      headers,
+      ["エリア", "地域"],
+      8
+    ),
+    interview: findProgressColumnIndex_(
+      headers,
+      ["面談日時", "面談日", "面談予定", "備考"],
+      9
+    )
+  };
+
+  console.log(
+    "案件進捗の見出し行: " + (headerRowIndex + 1) +
+    " / 面談列: " + (col.interview + 1)
+  );
+
+  const todayKey = Utilities.formatDate(
+    new Date(),
+    "Asia/Tokyo",
+    "yyyy-MM-dd"
+  );
+
+  const grouped = {};
+
+  for (
+    let rowIndex = headerRowIndex + 1;
+    rowIndex < rawValues.length;
+    rowIndex++
+  ) {
+    const rawRow = rawValues[rowIndex];
+    const displayRow = displayValues[rowIndex];
+
+    const status = getProgressCellDisplay_(displayRow, col.status);
+
+    if (
+      typeof isClosedProgressStatus_ === "function" &&
+      isClosedProgressStatus_(status)
+    ) {
+      continue;
+    }
+
+    const interviewRaw = getProgressCellRaw_(rawRow, col.interview);
+    const interviewDisplay = getProgressCellDisplay_(
+      displayRow,
+      col.interview
+    );
+
+    if (!interviewRaw && !interviewDisplay) continue;
+
+    const interviewDateKey = normalizeInterviewDateKey_(
+      interviewRaw,
+      interviewDisplay
+    );
+
+    if (interviewDateKey !== todayKey) continue;
+
+    const personStaff = normalizeAllowedStaffValue_(
+      getProgressCellDisplay_(displayRow, col.personStaff)
+    );
+
+    const projectStaff = normalizeAllowedStaffValue_(
+      getProgressCellDisplay_(displayRow, col.projectStaff)
+    );
+
+    const recipientStaff = personStaff || projectStaff;
+    if (!recipientStaff) continue;
+
+    if (!grouped[recipientStaff]) {
+      grouped[recipientStaff] = [];
+    }
+
+    grouped[recipientStaff].push({
+      rowNumber: rowIndex + 1,
+      time: extractInterviewTimeText_(
+        interviewRaw,
+        interviewDisplay
+      ),
+      interviewText:
+        interviewDisplay || formatInterviewValue_(interviewRaw),
+      name: getProgressCellDisplay_(displayRow, col.name),
+      company: getProgressCellDisplay_(displayRow, col.company),
+      upperCompany: getProgressCellDisplay_(
+        displayRow,
+        col.upperCompany
+      ),
+      status: status,
+      area: getProgressCellDisplay_(displayRow, col.area),
+      personTantou: personStaff,
+      caseTantou: projectStaff
+    });
+  }
+
+  Object.keys(grouped).forEach(staffName => {
+    grouped[staffName].sort((a, b) =>
+      String(a.time || "99:99").localeCompare(
+        String(b.time || "99:99"),
+        "ja"
+      )
+    );
+  });
+
+  return grouped;
+}
+
+
+function findProgressHeaderRowIndex_(displayValues) {
+  const maxRows = Math.min(displayValues.length, 20);
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  const importantHeaders = [
+    "人員担当者",
+    "所属会社名",
+    "名前",
+    "案件担当者",
+    "上位会社名",
+    "案件進捗",
+    "エリア",
+    "備考"
+  ];
+
+  for (let rowIndex = 0; rowIndex < maxRows; rowIndex++) {
+    const normalized = displayValues[rowIndex].map(value =>
+      String(value || "")
+        .normalize("NFKC")
+        .replace(/\s+/g, "")
+        .trim()
+    );
+
+    let score = 0;
+
+    importantHeaders.forEach(keyword => {
+      if (
+        normalized.some(cell =>
+          cell === keyword || cell.includes(keyword)
+        )
+      ) {
+        score++;
+      }
+    });
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = rowIndex;
+    }
+  }
+
+  if (bestScore < 3) {
+    throw new Error(
+      "案件進捗シートの見出し行を特定できませんでした。"
+    );
+  }
+
+  return bestIndex;
+}
+
+function findProgressColumnIndex_(headers, aliases, fallbackIndex) {
+  for (let i = 0; i < headers.length; i++) {
+    const header = String(headers[i] || "");
+
+    for (let j = 0; j < aliases.length; j++) {
+      if (header === aliases[j] || header.includes(aliases[j])) {
+        return i;
+      }
+    }
+  }
+
+  return fallbackIndex;
+}
+
+function getProgressCellDisplay_(row, index) {
+  if (!row || index < 0 || index >= row.length) return "";
+  return String(row[index] || "").trim();
+}
+
+function getProgressCellRaw_(row, index) {
+  if (!row || index < 0 || index >= row.length) return "";
+  return row[index];
+}
+
+/******************************
+ * 担当者マスタからLINE userId取得
+ * A列: LINE userId
+ * B列: LINE表示名
+ * C列: 担当者
+ ******************************/
+function getLineUserIdByStaffName_(staffName) {
+  const normalized = normalizeAllowedStaffValue_(staffName);
+  if (!normalized) return "";
+
+  const sheet = getOrCreateStaffMasterSheet_();
+  if (sheet.getLastRow() < 2) return "";
+
+  const values = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, 3)
+    .getDisplayValues();
+
+  for (let i = 0; i < values.length; i++) {
+    const userId = String(values[i][0] || "").trim();
+    const savedStaff = normalizeAllowedStaffValue_(values[i][2]);
+
+    if (savedStaff === normalized && userId) {
+      return userId;
+    }
+  }
+
+  return "";
+}
+
+/******************************
+ * 面談時間抽出
+ ******************************/
+function extractInterviewTimeText_(rawValue, displayValue) {
+  if (rawValue instanceof Date && !isNaN(rawValue.getTime())) {
+    return Utilities.formatDate(
+      rawValue,
+      "Asia/Tokyo",
+      "HH:mm"
+    );
+  }
+
+  const text = String(displayValue || rawValue || "")
+    .normalize("NFKC");
+
+  const match = text.match(
+    /(?:^|\s|日)(\d{1,2})[:：時](\d{2})?(?:分)?/
+  );
+
+  if (!match) return "";
+
+  const hour = String(Number(match[1])).padStart(2, "0");
+  const minute = String(match[2] || "00").padStart(2, "0");
+
+  return hour + ":" + minute;
+}
+
+/******************************
+ * 担当者個人向け通知文
+ ******************************/
+function makeStaffTodayInterviewReminderText_(staffName, reminders) {
+  const items = Array.isArray(reminders) ? reminders : [];
+  const lines = [];
+
+  lines.push("【本日の面談予定】");
+  lines.push("");
+
+  if (staffName) {
+    lines.push(staffName + "さん、おはようございます。");
+    lines.push("");
+  }
+
+  items.forEach((item, index) => {
+    if (index > 0) lines.push("");
+
+    lines.push(
+      "■" +
+      (item.time ? item.time + " " : "") +
+      (item.name || "名前未入力")
+    );
+
+    if (item.company) {
+      lines.push("所属会社：" + item.company);
+    }
+
+    if (item.upperCompany) {
+      lines.push("上位会社：" + item.upperCompany);
+    }
+
+    if (item.status) {
+      lines.push("案件進捗：" + item.status);
+    }
+
+    if (item.interviewText && !item.time) {
+      lines.push("面談予定：" + item.interviewText);
+    }
+
+    if (
+      item.caseTantou &&
+      item.caseTantou !== staffName
+    ) {
+      lines.push("案件担当者：" + item.caseTantou);
+    }
+  });
+
+  lines.push("");
+  lines.push("本日の面談は" + items.length + "件です。");
+  lines.push("対応漏れがないようご確認ください。");
+
+  return lines.join("\n");
+}
+
+/******************************
+ * 送信せずログだけ確認
+ ******************************/
+function previewTodayStaffInterviewReminders() {
+  const grouped = collectTodayInterviewRemindersByStaff_();
+
+  if (Object.keys(grouped).length === 0) {
+    Logger.log("本日の面談予定はありません。");
+    return;
+  }
+
+  Object.keys(grouped).forEach(staffName => {
+    const lineUserId = getLineUserIdByStaffName_(staffName);
+
+    Logger.log(
+      "送信先担当者: " + staffName +
+      "\nLINE userId登録: " + (lineUserId ? "あり" : "なし") +
+      "\n\n" +
+      makeStaffTodayInterviewReminderText_(
+        staffName,
+        grouped[staffName]
+      )
+    );
+  });
+}
+
+
+/******************************
+ * リマインド機能テスト用
+ * 今日の日付に該当する面談があれば送信します
+ ******************************/
+function testTodayProgressReminder() {
+  sendTodayProgressReminder();
+}
+
+
+
+
+/******************************
+ * 毎朝8時リマインドのトリガー作成
+ * GAS画面から一度だけ手動実行してください
+ ******************************/
+function createDaily8amReminderTrigger() {
+  // 既存の同じトリガーを削除して重複防止
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === "sendTodayProgressReminder") {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  // 毎日8時台に実行
+  ScriptApp.newTrigger("sendTodayProgressReminder")
+    .timeBased()
+    .everyDays(1)
+    .atHour(8)
+    .nearMinute(0)
+    .inTimezone("Asia/Tokyo")
+    .create();
+
+  Logger.log("毎朝8時の担当者別面談リマインドトリガーを作成しました。");
+}
+
+
+/******************************
+ * リマインドトリガー削除
+ * 不要になった場合のみ手動実行してください
+ ******************************/
+function deleteDailyReminderTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === "sendTodayProgressReminder") {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  Logger.log("面談リマインドトリガーを削除しました。");
+}
+
+/******************************
+ * LINEトークン確認用
+ ******************************/
+function testLineToken() {
+  const token = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ACCESS_TOKEN");
+
+  if (!token) {
+    Logger.log("LINE_CHANNEL_ACCESS_TOKEN が空です");
+    return;
+  }
+
+  const url = "https://api.line.me/v2/bot/info";
+
+  const res = UrlFetchApp.fetch(url, {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token
+    },
+    muteHttpExceptions: true
+  });
+
+  Logger.log("ステータスコード: " + res.getResponseCode());
+  Logger.log("レスポンス: " + res.getContentText());
+}
+
+
+/******************************
+ * Drive権限確認用
+ ******************************/
+function authorizeDrive() {
+  const blob = Utilities.newBlob("test", "text/plain", "test.txt");
+  const file = DriveApp.createFile(blob);
+  file.setTrashed(true);
+  Logger.log("Drive権限確認OK");
+}
+
+
+
+/******************************
+ * Webアプリ用
+ ******************************/
+function include_(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+
+/******************************
+ * 取り下げ判定
+ * 表記揺れ（取り下げ / 取下げ / 取下 / 取りさげ）に対応
+ ******************************/
+function isWithdrawnCandidateProgress_(progress) {
+  const value = String(progress || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .trim();
+
+  if (!value) return false;
+
+  return (
+    value.includes("取り下げ") ||
+    value.includes("取下げ") ||
+    value.includes("取下") ||
+    value.includes("取りさげ") ||
+    value === "完了" ||
+    value === "完了済み"
+  );
+}
+
+function getJobSeekersForApp(searchText, staffFilter, regionFilter) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const sheetNames = [
+    CONFIG.skillSheetNames.tokai,
+    CONFIG.skillSheetNames.kansai,
+    CONFIG.skillSheetNames.kanto,
+    CONFIG.skillSheetNames.kyushu,
+    CONFIG.skillSheetNames.other,
+    CONFIG.skillSheetNames.remote
+  ];
+
+  const query = String(searchText || "").trim().toLowerCase();
+  const staff = String(staffFilter || "").trim();
+  const region = String(regionFilter || "").trim();
+  const results = [];
+
+  sheetNames.forEach(sheetName => {
+    if (region && sheetName !== region) return;
+
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 5) return;
+
+    const values = sheet
+      .getRange(5, 1, lastRow - 4, CONFIG.skillColCount || 14)
+      .getDisplayValues();
+
+    values.forEach((row, index) => {
+      const name = String(row[2] || "").trim();
+      if (!name) return;
+
+      const item = {
+        sheetName: sheetName,
+        rowNumber: index + 5,
+        inputDate: row[0] || "",
+        staff: row[1] || "",
+        name: name,
+        prefecture: row[3] || "",
+        station: row[4] || "",
+        company: row[5] || "",
+        price: row[6] || "",
+        career: row[7] || "",
+        experience: row[8] || "",
+        startDate: row[9] || "",
+        updateDate: row[10] || "",
+        progress: row[11] || "",
+        moveType: row[12] || "",
+        remarks: row[13] || "",
+        region: sheetName
+      };
+
+      // L列の進捗が「取り下げ」「取下げ」の人は、
+      // 求職者一覧・検索結果・ダッシュボード件数に表示しない。
+      if (isWithdrawnCandidateProgress_(item.progress)) return;
+
+      if (staff && item.staff !== staff) return;
+
+      if (query) {
+        const haystack = [
+          item.name,
+          item.staff,
+          item.prefecture,
+          item.station,
+          item.company,
+          item.career,
+          item.experience,
+          item.progress,
+          item.remarks
+        ].join(" ").toLowerCase();
+
+        if (!haystack.includes(query)) return;
+      }
+
+      results.push(item);
+    });
+  });
+
+  results.sort((a, b) => {
+    const dateCompare = String(b.inputDate).localeCompare(String(a.inputDate));
+    if (dateCompare !== 0) return dateCompare;
+    return b.rowNumber - a.rowNumber;
+  });
+
+  return results.slice(0, 300);
+}
+
+
+/******************************
+ * 案件進捗の終了ステータス判定
+ * 不合格 / 辞退 / 案件消滅 / 合格 を非表示
+ ******************************/
+function isClosedProgressStatus_(status) {
+  const value = String(status || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .trim();
+
+  if (!value) return false;
+
+  return (
+    value.includes("不合格") ||
+    value.includes("辞退") ||
+    value.includes("案件消滅") ||
+    value === "合格" ||
+    value.startsWith("合格(") ||
+    value.startsWith("合格（")
+  );
+}
+
+function getProgressForApp(searchText, staffFilter) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.progressSheetName);
+
+  if (!sheet) {
+    throw new Error("案件進捗シートが見つかりません。");
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const query = String(searchText || "").trim().toLowerCase();
+  const staff = String(staffFilter || "").trim();
+
+  const values = sheet
+    .getRange(2, 2, lastRow - 1, 9)
+    .getDisplayValues();
+
+  return values
+    .map((row, index) => ({
+      rowNumber: index + 2,
+      entryMonth: row[0] || "",
+      staff: row[1] || "",
+      company: row[2] || "",
+      name: row[3] || "",
+      projectStaff: row[4] || "",
+      upperCompany: row[5] || "",
+      status: row[6] || "",
+      area: row[7] || "",
+      remarks: row[8] || ""
+    }))
+    .filter(item => {
+      if (!Object.values(item).some(v => String(v || "").trim())) return false;
+
+      // 不合格・辞退・案件消滅・合格は、案件一覧・検索・件数から除外する。
+      if (isClosedProgressStatus_(item.status)) return false;
+
+      if (staff && item.staff !== staff && item.projectStaff !== staff) return false;
+
+      if (query) {
+        const haystack = Object.values(item).join(" ").toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      return true;
+    })
+    .reverse()
+    .slice(0, 300);
+}
+
+function getTodayInterviewsForApp() {
+  // LINEリマインドと同じ見出し・備考列の自動検出処理を使用し、
+  // 担当者による絞り込みを行わず、会社全体の面談予定を返す。
+  const grouped = collectTodayInterviewRemindersByStaff_();
+  const results = [];
+
+  Object.keys(grouped).forEach(staffName => {
+    grouped[staffName].forEach(item => {
+      results.push({
+        rowNumber: item.rowNumber,
+        name: item.name || "",
+        staff: item.personTantou || staffName || "",
+        company: item.company || "",
+        projectStaff: item.caseTantou || "",
+        upperCompany: item.upperCompany || "",
+        status: item.status || "",
+        area: item.area || "",
+        interviewDate: item.interviewText || "",
+        interviewTime: item.time || "",
+        remarks: item.interviewText || ""
+      });
+    });
+  });
+
+  return results.sort((a, b) =>
+    String(a.interviewTime || "99:99").localeCompare(
+      String(b.interviewTime || "99:99"),
+      "ja"
+    )
+  );
+}
+
+function getAppFilterOptions() {
+  return {
+    staff: ["山本", "白木", "吉本", "荒井", "森田", "長崎", "上澤", "山田"],
+    regions: [
+      CONFIG.skillSheetNames.tokai,
+      CONFIG.skillSheetNames.kansai,
+      CONFIG.skillSheetNames.kanto,
+      CONFIG.skillSheetNames.kyushu,
+      CONFIG.skillSheetNames.other,
+      CONFIG.skillSheetNames.remote
+    ],
+    progressStatuses: getProgressStatusOptions_()
+  };
+}
+
+
+
+/******************************
+ * Webアプリ：求職者編集
+ ******************************/
+function updateJobSeekerFromApp(payload) {
+  if (!payload || !payload.sheetName || !payload.rowNumber) {
+    throw new Error("更新対象が特定できません。");
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(String(payload.sheetName));
+
+  if (!sheet) {
+    throw new Error("更新対象シートが見つかりません。");
+  }
+
+  const row = Number(payload.rowNumber);
+  if (!Number.isInteger(row) || row < 5 || row > sheet.getLastRow()) {
+    throw new Error("更新対象の行番号が不正です。");
+  }
+
+  const allowedStaff = ["山本", "白木", "吉本", "荒井", "森田", "長崎", "上澤", "山田"];
+  const allowedCareer = ["", "SB/Y", "au/UQ", "docomo", "楽天"];
+  const allowedExperience = ["", "通信経験者", "通信未経験", "通信微経験", "コール経験者", "コール未経験"];
+  const allowedMoveType = ["", "○", "×", "距離次第"];
+
+  const staff = String(payload.staff || "").trim();
+  const career = String(payload.career || "").trim();
+  const experience = String(payload.experience || "").trim();
+  const moveType = String(payload.moveType || "").trim();
+
+  if (staff && !allowedStaff.includes(staff)) {
+    throw new Error("担当者の値が不正です。");
+  }
+  if (!allowedCareer.includes(career)) {
+    throw new Error("キャリアの値が不正です。");
+  }
+  if (!allowedExperience.includes(experience)) {
+    throw new Error("経験値の値が不正です。");
+  }
+  if (!allowedMoveType.includes(moveType)) {
+    throw new Error("移動型可否の値が不正です。");
+  }
+
+  const currentName = String(sheet.getRange(row, 3).getDisplayValue() || "").trim();
+  const originalName = String(payload.originalName || "").trim();
+
+  if (originalName && currentName && originalName !== currentName) {
+    throw new Error(
+      "対象データが更新されています。画面を再読み込みしてから再度編集してください。"
+    );
+  }
+
+  const values = {
+    2: staff,
+    3: String(payload.name || "").trim(),
+    4: String(payload.prefecture || "").trim(),
+    5: normalizeNearestStationValue_(String(payload.station || "").trim()),
+    6: String(payload.company || "").trim(),
+    7: normalizePriceValue_(String(payload.price || "").trim()),
+    8: career,
+    9: experience,
+    10: normalizeStartDateValue_(String(payload.startDate || "").trim()),
+    11: Utilities.formatDate(new Date(), "Asia/Tokyo", "M/d"),
+    12: String(payload.progress || "").trim(),
+    13: moveType,
+    14: String(payload.remarks || "").trim()
+  };
+
+  Object.keys(values).forEach(colText => {
+    const col = Number(colText);
+    setCellValueSafe_(sheet, row, col, values[col]);
+  });
+
+  // 文字サイズ・行高を固定
+  sheet.getRange(row, 1, 1, CONFIG.skillColCount || 14).setFontSize(16);
+  sheet.setRowHeight(row, 40);
+
+  SpreadsheetApp.flush();
+
+  return {
+    success: true,
+    message: "更新しました。",
+    item: {
+      sheetName: sheet.getName(),
+      rowNumber: row,
+      inputDate: sheet.getRange(row, 1).getDisplayValue(),
+      staff: sheet.getRange(row, 2).getDisplayValue(),
+      name: sheet.getRange(row, 3).getDisplayValue(),
+      prefecture: sheet.getRange(row, 4).getDisplayValue(),
+      station: sheet.getRange(row, 5).getDisplayValue(),
+      company: sheet.getRange(row, 6).getDisplayValue(),
+      price: sheet.getRange(row, 7).getDisplayValue(),
+      career: sheet.getRange(row, 8).getDisplayValue(),
+      experience: sheet.getRange(row, 9).getDisplayValue(),
+      startDate: sheet.getRange(row, 10).getDisplayValue(),
+      updateDate: sheet.getRange(row, 11).getDisplayValue(),
+      progress: sheet.getRange(row, 12).getDisplayValue(),
+      moveType: sheet.getRange(row, 13).getDisplayValue(),
+      remarks: sheet.getRange(row, 14).getDisplayValue(),
+      region: sheet.getName()
+    }
+  };
+}
+
+function makeProposalTextForApp(payload) {
+  const person = {
+    nearest_station: String(payload.station || "").trim(),
+    prefecture: String(payload.prefecture || "").trim(),
+    career: String(payload.career || "").trim(),
+    experience: String(payload.experience || "").trim(),
+    remarks: String(payload.remarks || "").trim(),
+    start_date: String(payload.startDate || "").trim(),
+    price: String(payload.price || "").trim()
+  };
+
+  return makeRegisteredPersonFormat_(person);
+}
+
+
+
+
+/******************************
+ * WC-6.2 案件進捗マスタ・LINE更新・履歴
+ ******************************/
+function getProgressSheetStructure_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.progressSheetName);
+  if (!sheet) throw new Error("案件進捗シートが見つかりません。");
+
+  const display = sheet.getDataRange().getDisplayValues();
+  const headerRowIndex = findProgressHeaderRowIndex_(display);
+  const headers = display[headerRowIndex].map(value =>
+    String(value || "").normalize("NFKC").replace(/\s+/g, "").trim()
+  );
+
+  return {
+    sheet: sheet,
+    headerRowIndex: headerRowIndex,
+    firstDataRow: headerRowIndex + 2,
+    col: {
+      entryMonth: findProgressColumnIndex_(headers, ["エントリー月"], 1),
+      personStaff: findProgressColumnIndex_(headers, ["人員担当者", "担当者", "人材担当者"], 2),
+      company: findProgressColumnIndex_(headers, ["所属会社名", "所属会社", "会社名"], 3),
+      name: findProgressColumnIndex_(headers, ["名前", "氏名", "求職者名"], 4),
+      projectStaff: findProgressColumnIndex_(headers, ["案件担当者", "営業担当者"], 5),
+      upperCompany: findProgressColumnIndex_(headers, ["上位会社名", "上位会社"], 6),
+      status: findProgressColumnIndex_(headers, ["案件進捗", "進捗", "ステータス"], 7),
+      area: findProgressColumnIndex_(headers, ["エリア", "地域"], 8),
+      remarks: findProgressColumnIndex_(headers, ["備考", "面談日時", "面談日", "面談予定"], 9)
+    }
+  };
+}
+
+function getProgressStatusOptions_() {
+  const structure = getProgressSheetStructure_();
+  const sheet = structure.sheet;
+  const statusCol = structure.col.status + 1;
+  const startRow = structure.firstDataRow;
+  const maxRow = Math.max(sheet.getLastRow(), startRow);
+  const validations = sheet.getRange(startRow, statusCol, Math.max(1, maxRow - startRow + 1), 1).getDataValidations();
+  const options = [];
+
+  validations.some(row => {
+    const rule = row[0];
+    if (!rule) return false;
+    const type = rule.getCriteriaType();
+    const args = rule.getCriteriaValues();
+
+    if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+      (args[0] || []).forEach(value => options.push(String(value || "").trim()));
+      return options.length > 0;
+    }
+
+    if (type === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+      const range = args[0];
+      if (range) {
+        range.getDisplayValues().flat().forEach(value => options.push(String(value || "").trim()));
+      }
+      return options.length > 0;
+    }
+    return false;
+  });
+
+  if (options.length === 0 && sheet.getLastRow() >= startRow) {
+    sheet.getRange(startRow, statusCol, sheet.getLastRow() - startRow + 1, 1)
+      .getDisplayValues().flat().forEach(value => options.push(String(value || "").trim()));
+  }
+
+  return [...new Set(options.filter(Boolean))];
+}
+
+function normalizeProgressMatchText_(value) {
+  return String(value || "").normalize("NFKC")
+    .replace(/[（]/g, "(").replace(/[）]/g, ")")
+    .replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function findProgressStatusInText_(text) {
+  const normalizedText = normalizeProgressMatchText_(text);
+  const options = getProgressStatusOptions_();
+  const matches = options.filter(option => normalizedText.includes(normalizeProgressMatchText_(option)));
+  if (!matches.length) return "";
+  return matches.sort((a, b) => normalizeProgressMatchText_(b).length - normalizeProgressMatchText_(a).length)[0];
+}
+
+function isLineProgressUpdateIntent_(text) {
+  const value = String(text || "").trim();
+  if (/^(案件更新|進捗更新|案件進捗更新)/.test(value)) return true;
+  return !!findProgressStatusInText_(value);
+}
+
+function parseLineProgressUpdateRequest_(text) {
+  const structure = getProgressSheetStructure_();
+  const status = findProgressStatusInText_(text);
+  if (!status) {
+    throw new Error("案件進捗を判定できませんでした。\nスプレッドのプルダウンと同じ文言を含めて送ってください。");
+  }
+
+  const sheet = structure.sheet;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < structure.firstDataRow) throw new Error("案件進捗データがありません。");
+
+  const values = sheet.getRange(
+    structure.firstDataRow, 1,
+    lastRow - structure.firstDataRow + 1,
+    Math.max(sheet.getLastColumn(), structure.col.remarks + 1)
+  ).getDisplayValues();
+
+  const normalizedText = normalizeProgressMatchText_(text);
+  const candidates = [];
+  values.forEach((row, index) => {
+    const name = getProgressCellDisplay_(row, structure.col.name);
+    if (!name) return;
+    const compactName = normalizeProgressMatchText_(name);
+    const noSpaceName = compactName.replace(/[・･]/g, "");
+    if (normalizedText.includes(compactName) || normalizedText.includes(noSpaceName)) {
+      candidates.push({
+        rowNumber: structure.firstDataRow + index,
+        name: name,
+        company: getProgressCellDisplay_(row, structure.col.company),
+        currentStatus: getProgressCellDisplay_(row, structure.col.status),
+        currentRemarks: getProgressCellDisplay_(row, structure.col.remarks)
+      });
+    }
+  });
+
+  if (candidates.length === 0) {
+    throw new Error("対象の氏名を案件進捗シートから見つけられませんでした。\n氏名をフルネームで送ってください。");
+  }
+  if (candidates.length > 1) {
+    const lines = candidates.slice(0, 8).map((x, i) =>
+      (i + 1) + ". " + x.name + " / " + (x.company || "所属会社未設定") + " / " + (x.currentStatus || "進捗未設定")
+    );
+    throw new Error("同じ氏名の候補が複数あります。\n所属会社名も含めて送り直してください。\n\n" + lines.join("\n"));
+  }
+
+  const candidate = candidates[0];
+  const interviewText = extractLineInterviewDateTime_(text);
+  const newRemarks = mergeInterviewTextIntoRemarks_(candidate.currentRemarks, interviewText);
+
+  return {
+    rowNumber: candidate.rowNumber,
+    name: candidate.name,
+    company: candidate.company,
+    beforeStatus: candidate.currentStatus,
+    afterStatus: status,
+    beforeRemarks: candidate.currentRemarks,
+    afterRemarks: newRemarks,
+    interviewText: interviewText
+  };
+}
+
+function extractLineInterviewDateTime_(text) {
+  const value = String(text || "").normalize("NFKC");
+  const now = new Date();
+  const tz = "Asia/Tokyo";
+  let year = Number(Utilities.formatDate(now, tz, "yyyy"));
+  let month = Number(Utilities.formatDate(now, tz, "M"));
+  let day = Number(Utilities.formatDate(now, tz, "d"));
+  let hasDate = false;
+
+  if (value.includes("明日")) {
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    year = Number(Utilities.formatDate(tomorrow, tz, "yyyy"));
+    month = Number(Utilities.formatDate(tomorrow, tz, "M"));
+    day = Number(Utilities.formatDate(tomorrow, tz, "d"));
+    hasDate = true;
+  } else if (value.includes("今日") || value.includes("本日")) {
+    hasDate = true;
+  } else {
+    let m = value.match(/(20\d{2})[\/\-.年]\s*(\d{1,2})[\/\-.月]\s*(\d{1,2})日?/);
+    if (m) {
+      year = Number(m[1]); month = Number(m[2]); day = Number(m[3]); hasDate = true;
+    } else {
+      m = value.match(/(?:^|\D)(\d{1,2})[\/\-.月]\s*(\d{1,2})日?/);
+      if (m) { month = Number(m[1]); day = Number(m[2]); hasDate = true; }
+    }
+  }
+
+  let hour = null, minute = null;
+  let tm = value.match(/(?:^|\D)([01]?\d|2[0-3]):([0-5]\d)(?:\D|$)/);
+  if (tm) { hour = Number(tm[1]); minute = Number(tm[2]); }
+  else {
+    tm = value.match(/([01]?\d|2[0-3])時(?:\s*([0-5]?\d)分?)?/);
+    if (tm) { hour = Number(tm[1]); minute = Number(tm[2] || 0); }
+  }
+
+  if (!hasDate && hour === null) return "";
+  const datePart = hasDate ? month + "/" + day : "";
+  const timePart = hour !== null ? String(hour).padStart(2, "0") + ":" + String(minute || 0).padStart(2, "0") : "";
+  return [datePart, timePart].filter(Boolean).join(" ");
+}
+
+function mergeInterviewTextIntoRemarks_(remarks, interviewText) {
+  const current = String(remarks || "").trim();
+  if (!interviewText) return current;
+  const cleaned = current
+    .replace(/(?:20\d{2}[\/\-.年])?\d{1,2}[\/\-.月]\d{1,2}日?\s*(?:[01]?\d|2[0-3])(?::[0-5]\d|時(?:[0-5]?\d分?)?)?/g, "")
+    .replace(/\s*\/\s*\/\s*/g, " / ")
+    .replace(/^\s*\/|\/\s*$/g, "")
+    .trim();
+  return cleaned ? interviewText + " / " + cleaned : interviewText;
+}
+
+function savePendingProgressUpdate_(sessionId, data) {
+  PropertiesService.getScriptProperties().setProperty("PENDING_PROGRESS_UPDATE_" + sessionId, JSON.stringify(data || {}));
+}
+function getPendingProgressUpdate_(sessionId) {
+  const raw = PropertiesService.getScriptProperties().getProperty("PENDING_PROGRESS_UPDATE_" + sessionId);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { return null; }
+}
+function clearPendingProgressUpdate_(sessionId) {
+  PropertiesService.getScriptProperties().deleteProperty("PENDING_PROGRESS_UPDATE_" + sessionId);
+}
+
+function makeProgressUpdateConfirmText_(data) {
+  return [
+    "以下の内容で案件進捗を更新しますか？", "",
+    "氏名：" + data.name,
+    "所属会社：" + (data.company || "未設定"),
+    "変更前：" + (data.beforeStatus || "未設定"),
+    "変更後：" + data.afterStatus,
+    data.interviewText ? "面談日時：" + data.interviewText : "",
+    "", "更新する場合は「更新」", "やめる場合は「キャンセル」と返信してください。"
+  ].filter(line => line !== "").join("\n");
+}
+
+function applyPendingProgressUpdate_(sessionId, updater, lineUserId) {
+  const pending = getPendingProgressUpdate_(sessionId);
+  if (!pending) throw new Error("確認待ちの案件進捗更新がありません。");
+  const structure = getProgressSheetStructure_();
+  const sheet = structure.sheet;
+  const row = Number(pending.rowNumber);
+  const currentName = sheet.getRange(row, structure.col.name + 1).getDisplayValue();
+  if (String(currentName).trim() !== String(pending.name).trim()) {
+    clearPendingProgressUpdate_(sessionId);
+    throw new Error("対象行が変更されています。もう一度更新内容を送ってください。");
+  }
+
+  const allowed = getProgressStatusOptions_();
+  if (allowed.length && !allowed.includes(pending.afterStatus)) {
+    clearPendingProgressUpdate_(sessionId);
+    throw new Error("案件進捗の候補が変更されています。もう一度送ってください。");
+  }
+
+  setCellValueSafe_(sheet, row, structure.col.status + 1, pending.afterStatus);
+  if (pending.afterRemarks !== pending.beforeRemarks) {
+    setCellValueSafe_(sheet, row, structure.col.remarks + 1, pending.afterRemarks);
+  }
+  SpreadsheetApp.flush();
+
+  appendProgressUpdateHistory_({
+    source: "LINE", updater: updater || "LINE担当者", lineUserId: lineUserId || "",
+    rowNumber: row, name: pending.name, company: pending.company,
+    beforeStatus: pending.beforeStatus, afterStatus: pending.afterStatus,
+    beforeRemarks: pending.beforeRemarks, afterRemarks: pending.afterRemarks
+  });
+  clearPendingProgressUpdate_(sessionId);
+  return pending;
+}
+
+function makeProgressUpdateCompletedText_(data) {
+  return [
+    "✅ 案件進捗を更新しました", "",
+    "氏名：" + data.name,
+    "案件進捗：" + data.afterStatus,
+    data.interviewText ? "面談日時：" + data.interviewText : ""
+  ].filter(line => line !== "").join("\n");
+}
+
+function getOrCreateProgressHistorySheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const name = CONFIG.progressHistorySheetName || "案件進捗更新履歴";
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.getRange(1, 1, 1, 11).setValues([[
+      "更新日時", "更新元", "更新者", "LINE userId", "案件進捗行", "氏名", "所属会社",
+      "変更前進捗", "変更後進捗", "変更前備考", "変更後備考"
+    ]]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function appendProgressUpdateHistory_(data) {
+  const sheet = getOrCreateProgressHistorySheet_();
+  sheet.appendRow([
+    Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss"),
+    data.source || "", data.updater || "", data.lineUserId || "", data.rowNumber || "",
+    data.name || "", data.company || "", data.beforeStatus || "", data.afterStatus || "",
+    data.beforeRemarks || "", data.afterRemarks || ""
+  ]);
+}
+
+/*****************************************************************
+ * WonderCraft v5 PWA API
+ *
+ * Script Properties に以下を設定してください。
+ * PWA_ACCESS_PIN : 社員共通の6桁以上のPIN
+ *
+ * 秘密情報はGitHubへ置かず、利用者がアプリでPINを入力します。
+ *****************************************************************/
+function isPwaApiRequest_(e) {
+  if (!e) return false;
+
+  if (e.parameter && String(e.parameter.api || "") === "1") {
+    return true;
+  }
+
+  const raw = e.postData && e.postData.contents
+    ? String(e.postData.contents)
+    : "";
+
+  if (!raw) return false;
+
+  try {
+    const body = JSON.parse(raw);
+    return body && body.wc_api === true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function handlePwaApiGet_(e) {
+  const params = e && e.parameter ? e.parameter : {};
+  const action = String(params.action || "health").trim();
+
+  if (action === "health") {
+    return createPwaJsonResponse_({
+      success: true,
+      app: "WonderCraft v5 API",
+      version: "5.4.0",
+      time: Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss")
+    }, params.callback);
+  }
+
+  // 初回端末登録。自動登録が有効な間はPIN入力不要。
+  if (action === "enroll") {
+    const enrollment = enrollPwaDevice_({
+      deviceId: params.deviceId || "",
+      deviceName: params.deviceName || "",
+      pin: params.pin || ""
+    });
+
+    return createPwaJsonResponse_({
+      success: true,
+      data: enrollment
+    }, params.callback);
+  }
+
+  const auth = authenticatePwaRequest_({
+    token: params.token || "",
+    pin: params.pin || ""
+  });
+
+  let data;
+
+  switch (action) {
+    case "config":
+      data = getPwaRuntimeConfig_(auth);
+      break;
+
+    case "filters":
+      data = getAppFilterOptions();
+      break;
+
+    case "dashboard":
+      data = getPwaDashboard_();
+      break;
+
+    case "candidates":
+      data = getJobSeekersForApp(
+        params.q || "",
+        params.staff || "",
+        params.region || ""
+      );
+      break;
+
+    case "progress":
+      data = getProgressForApp(
+        params.q || "",
+        params.staff || ""
+      );
+      break;
+
+    case "today":
+      data = getTodayInterviewsForApp();
+      break;
+
+    default:
+      throw new Error("未対応のAPI actionです: " + action);
+  }
+
+  return createPwaJsonResponse_({
+    success: true,
+    data: data
+  }, params.callback);
+}
+
+function handlePwaApiPost_(e) {
+  try {
+    const raw = e && e.postData && e.postData.contents
+      ? String(e.postData.contents)
+      : "";
+
+    if (!raw) {
+      throw new Error("リクエスト本文が空です。");
+    }
+
+    const body = JSON.parse(raw);
+    const action = String(body.action || "").trim();
+
+    const auth = authenticatePwaRequest_({
+      token: body.token || "",
+      pin: body.pin || ""
+    });
+
+    let data;
+
+    switch (action) {
+      case "updateCandidate":
+        data = updateJobSeekerFromApp(body.payload || {});
+        break;
+
+      case "updateProgress":
+        data = updateProgressFromPwa_(body.payload || {}, auth);
+        break;
+
+      case "proposalText":
+        data = makeProposalTextForApp(body.payload || {});
+        break;
+
+      case "deviceStatus":
+        data = {
+          deviceId: auth.deviceId || "",
+          deviceName: auth.deviceName || "",
+          tokenVersion: auth.tokenVersion || getPwaTokenVersion_()
+        };
+        break;
+
+      default:
+        throw new Error("未対応のAPI actionです: " + action);
+    }
+
+    return createPwaJsonResponse_({
+      success: true,
+      data: data
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    return createPwaJsonResponse_({
+      success: false,
+      error: error && error.message ? error.message : String(error),
+      code: getPwaErrorCode_(error)
+    });
+  }
+}
+
+
+/*****************************************************************
+ * WonderCraft v5.4 端末トークン認証
+ *
+ * スクリプトプロパティ:
+ * PWA_ACCESS_PIN       初回登録用PIN
+ * PWA_AUTO_ENROLL      TRUEならPINなしで端末を自動登録
+ * PWA_TOKEN_VERSION    全端末を一括無効化するとき数字を増やす
+ * PWA_APP_CONFIG       任意の共通設定JSON
+ *
+ * 端末情報は「PWA端末」シートで管理する。
+ *****************************************************************/
+function getOrCreatePwaDeviceSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("PWA端末");
+
+  if (!sheet) {
+    sheet = ss.insertSheet("PWA端末");
+    sheet.getRange(1, 1, 1, 7).setValues([[
+      "トークンハッシュ",
+      "端末ID",
+      "端末名",
+      "状態",
+      "登録日時",
+      "最終利用日時",
+      "トークンバージョン"
+    ]]);
+    sheet.setFrozenRows(1);
+  }
+
+  return sheet;
+}
+
+function enrollPwaDevice_(request) {
+  const props = PropertiesService.getScriptProperties();
+  const autoEnroll = String(
+    props.getProperty("PWA_AUTO_ENROLL") || ""
+  ).toUpperCase() === "TRUE";
+
+  if (!autoEnroll) {
+    requirePwaPin_(request.pin);
+  }
+
+  const deviceId = String(request.deviceId || "").trim();
+  const deviceName = String(request.deviceName || "端末").trim().slice(0, 100);
+
+  if (!deviceId) {
+    throw new Error("端末IDを取得できませんでした。");
+  }
+
+  const sheet = getOrCreatePwaDeviceSheet_();
+  const now = new Date();
+  const version = getPwaTokenVersion_();
+
+  // 同じ端末IDが有効登録済みの場合も、新しいトークンへ安全に更新する。
+  const rawToken = createPwaRawToken_();
+  const tokenHash = hashPwaToken_(rawToken);
+  const values = sheet.getLastRow() >= 2
+    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues()
+    : [];
+
+  let targetRow = 0;
+
+  values.forEach((row, index) => {
+    if (String(row[1] || "") === deviceId) {
+      targetRow = index + 2;
+    }
+  });
+
+  const rowData = [[
+    tokenHash,
+    deviceId,
+    deviceName,
+    "有効",
+    now,
+    now,
+    version
+  ]];
+
+  if (targetRow) {
+    sheet.getRange(targetRow, 1, 1, 7).setValues(rowData);
+  } else {
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, 7).setValues(rowData);
+  }
+
+  return {
+    token: rawToken,
+    deviceId: deviceId,
+    deviceName: deviceName,
+    tokenVersion: version,
+    config: getPwaRuntimeConfig_({
+      deviceId: deviceId,
+      deviceName: deviceName,
+      tokenVersion: version
+    })
+  };
+}
+
+function authenticatePwaRequest_(request) {
+  const token = String(request.token || "").trim();
+
+  // v5.3以前からの移行期間中はPIN認証も許可する。
+  if (!token && request.pin) {
+    requirePwaPin_(request.pin);
+    return {
+      legacyPin: true,
+      deviceId: "",
+      deviceName: "",
+      tokenVersion: getPwaTokenVersion_()
+    };
+  }
+
+  if (!token) {
+    const error = new Error("端末登録が必要です。");
+    error.pwaCode = "DEVICE_ENROLL_REQUIRED";
+    throw error;
+  }
+
+  const hash = hashPwaToken_(token);
+  const sheet = getOrCreatePwaDeviceSheet_();
+
+  if (sheet.getLastRow() < 2) {
+    const error = new Error("登録端末が見つかりません。");
+    error.pwaCode = "DEVICE_TOKEN_INVALID";
+    throw error;
+  }
+
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+  const currentVersion = getPwaTokenVersion_();
+
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+
+    if (String(row[0] || "") !== hash) continue;
+
+    const status = String(row[3] || "").trim();
+    const tokenVersion = Number(row[6] || 1);
+
+    if (status !== "有効") {
+      const error = new Error("この端末は利用停止されています。");
+      error.pwaCode = "DEVICE_DISABLED";
+      throw error;
+    }
+
+    if (tokenVersion !== currentVersion) {
+      const error = new Error("端末認証の更新が必要です。");
+      error.pwaCode = "DEVICE_TOKEN_EXPIRED";
+      throw error;
+    }
+
+    sheet.getRange(i + 2, 6).setValue(new Date());
+
+    return {
+      deviceId: String(row[1] || ""),
+      deviceName: String(row[2] || ""),
+      tokenVersion: tokenVersion
+    };
+  }
+
+  const error = new Error("端末トークンが無効です。");
+  error.pwaCode = "DEVICE_TOKEN_INVALID";
+  throw error;
+}
+
+function createPwaRawToken_() {
+  return [
+    Utilities.getUuid(),
+    Utilities.getUuid(),
+    new Date().getTime()
+  ].join("-");
+}
+
+function hashPwaToken_(token) {
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(token || ""),
+    Utilities.Charset.UTF_8
+  );
+
+  return bytes.map(byte => {
+    const value = byte < 0 ? byte + 256 : byte;
+    return ("0" + value.toString(16)).slice(-2);
+  }).join("");
+}
+
+function getPwaTokenVersion_() {
+  const value = Number(
+    PropertiesService.getScriptProperties().getProperty("PWA_TOKEN_VERSION") || 1
+  );
+
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
+}
+
+function getPwaRuntimeConfig_(auth) {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty("PWA_APP_CONFIG") || "";
+  let custom = {};
+
+  if (raw) {
+    try {
+      custom = JSON.parse(raw);
+    } catch (error) {
+      console.error("PWA_APP_CONFIG JSONエラー: " + error.message);
+    }
+  }
+
+  return Object.assign({
+    appName: "WonderCraft 人材管理",
+    apiVersion: "5.4.0",
+    maintenance: false,
+    maintenanceMessage: "",
+    defaultView: "candidates",
+    pageSize: 50,
+    deviceId: auth && auth.deviceId ? auth.deviceId : "",
+    deviceName: auth && auth.deviceName ? auth.deviceName : ""
+  }, custom);
+}
+
+function getPwaErrorCode_(error) {
+  return error && error.pwaCode
+    ? String(error.pwaCode)
+    : "API_ERROR";
+}
+
+
+function requirePwaPin_(inputPin) {
+  const savedPin = PropertiesService
+    .getScriptProperties()
+    .getProperty("PWA_ACCESS_PIN");
+
+  if (!savedPin) {
+    throw new Error(
+      "PWA_ACCESS_PINが未設定です。Apps Scriptのプロジェクトの設定からスクリプトプロパティへ追加してください。"
+    );
+  }
+
+  const input = String(inputPin || "").trim();
+  const expected = String(savedPin).trim();
+
+  if (!input || input !== expected) {
+    throw new Error("アクセスPINが違います。");
+  }
+}
+
+function createPwaJsonResponse_(payload, callback) {
+  const text = JSON.stringify(payload);
+
+  if (callback && /^[a-zA-Z_$][0-9a-zA-Z_$\.]*$/.test(String(callback))) {
+    return ContentService
+      .createTextOutput(String(callback) + "(" + text + ");")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
+  return ContentService
+    .createTextOutput(text)
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getPwaDashboard_() {
+  const candidates = getJobSeekersForApp("", "", "");
+  const progress = getProgressForApp("", "");
+  const today = getTodayInterviewsForApp();
+
+  const waiting = candidates.filter(item =>
+    String(item.progress || "").includes("案件待ち")
+  ).length;
+
+  return {
+    candidates: candidates.length,
+    progress: progress.length,
+    todayInterviews: today.length,
+    waitingCandidates: waiting,
+    updatedAt: Utilities.formatDate(
+      new Date(),
+      "Asia/Tokyo",
+      "yyyy-MM-dd HH:mm"
+    )
+  };
+}
+
+function updateProgressFromPwa_(payload, auth) {
+  if (!payload || !payload.rowNumber) {
+    throw new Error("更新対象の案件進捗行が特定できません。");
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.progressSheetName);
+
+  if (!sheet) {
+    throw new Error("案件進捗シートが見つかりません。");
+  }
+
+  const row = Number(payload.rowNumber);
+
+  if (!Number.isInteger(row) || row < 2 || row > sheet.getLastRow()) {
+    throw new Error("案件進捗の行番号が不正です。");
+  }
+
+  const originalName = String(payload.originalName || "").trim();
+  const currentName = String(sheet.getRange(row, 5).getDisplayValue() || "").trim();
+
+  if (originalName && currentName && originalName !== currentName) {
+    throw new Error(
+      "対象データが変更されています。再読み込みしてから編集してください。"
+    );
+  }
+
+  const requestedStatus = String(payload.status || "").trim();
+  const allowedStatuses = getProgressStatusOptions_();
+  if (requestedStatus && allowedStatuses.length > 0 && !allowedStatuses.includes(requestedStatus)) {
+    throw new Error("案件進捗の値がプルダウン候補にありません。");
+  }
+
+  const beforeStatus = String(sheet.getRange(row, 8).getDisplayValue() || "").trim();
+  const beforeRemarks = String(sheet.getRange(row, 10).getDisplayValue() || "").trim();
+
+  const values = [
+    String(payload.entryMonth || "").trim(),
+    normalizeAllowedStaffValue_(payload.staff || ""),
+    String(payload.company || "").trim(),
+    String(payload.name || "").trim(),
+    normalizeAllowedStaffValue_(payload.projectStaff || ""),
+    String(payload.upperCompany || "").trim(),
+    requestedStatus,
+    String(payload.area || "").trim(),
+    String(payload.remarks || "").trim()
+  ];
+
+  // B:J を更新。既存の色・罫線・入力規則は変更しない。
+  values.forEach((value, index) => {
+    setCellValueSafe_(sheet, row, index + 2, value);
+  });
+
+  SpreadsheetApp.flush();
+
+  const updaterName = auth && auth.deviceName
+    ? "PWA / " + auth.deviceName
+    : "PWA";
+  appendProgressUpdateHistory_({
+    source: "PWA",
+    updater: updaterName,
+    lineUserId: "",
+    rowNumber: row,
+    name: sheet.getRange(row, 5).getDisplayValue(),
+    company: sheet.getRange(row, 4).getDisplayValue(),
+    beforeStatus: beforeStatus,
+    afterStatus: sheet.getRange(row, 8).getDisplayValue(),
+    beforeRemarks: beforeRemarks,
+    afterRemarks: sheet.getRange(row, 10).getDisplayValue()
+  });
+
+  return {
+    success: true,
+    message: "案件進捗を更新しました。",
+    item: {
+      rowNumber: row,
+      entryMonth: sheet.getRange(row, 2).getDisplayValue(),
+      staff: sheet.getRange(row, 3).getDisplayValue(),
+      company: sheet.getRange(row, 4).getDisplayValue(),
+      name: sheet.getRange(row, 5).getDisplayValue(),
+      projectStaff: sheet.getRange(row, 6).getDisplayValue(),
+      upperCompany: sheet.getRange(row, 7).getDisplayValue(),
+      status: sheet.getRange(row, 8).getDisplayValue(),
+      area: sheet.getRange(row, 9).getDisplayValue(),
+      remarks: sheet.getRange(row, 10).getDisplayValue()
+    }
+  };
+}

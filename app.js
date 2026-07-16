@@ -1,5 +1,5 @@
-/* WonderCraft PWA v6.1.0 - ホーム画面完成版 */
-const state={view:"home",candidates:[],progress:[],today:[],selected:null,runtimeConfig:{}};
+/* WonderCraft PWA WC-6.2 - 案件進捗プルダウン・LINE更新対応 */
+const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{}};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
@@ -8,6 +8,7 @@ window.addEventListener("load",()=>{
   setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$('splash')?.remove(),450)},900);
   if("serviceWorker"in navigator)navigator.serviceWorker.register("./service-worker.js").catch(console.error);
   bindEvents();
+  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-6.2";
   initialize();
 });
 
@@ -121,7 +122,7 @@ async function apiPost(action,payload){
   return json.data;
 }
 
-async function loadFilters(){try{const o=await apiGet("filters");fillSelect("staffFilter",o.staff||[],"担当者：全員");fillSelect("regionFilter",o.regions||[],"地域：すべて")}catch(e){showError(e)}}
+async function loadFilters(){try{const o=await apiGet("filters");state.progressStatuses=o.progressStatuses||[];fillSelect("staffFilter",o.staff||[],"担当者：全員");fillSelect("regionFilter",o.regions||[],"地域：すべて")}catch(e){showError(e)}}
 function fillSelect(id,items,first){const el=$(id),old=el.value;el.innerHTML=`<option value="">${first}</option>`;items.forEach(v=>el.insertAdjacentHTML("beforeend",`<option value="${esc(v)}">${esc(v)}</option>`));el.value=old}
 async function loadDashboard(){try{renderDashboard(await apiGet("dashboard"))}catch(e){showError(e)}}
 function renderDashboard(d){$("countCandidates").textContent=d.candidates??"-";$("countProgress").textContent=d.progress??"-";$("countToday").textContent=d.todayInterviews??"-";$("countWaiting").textContent=d.waitingCandidates??"-"}
@@ -239,12 +240,18 @@ function buildCandidateForm(x){
     field("fMove","移動型可否",x.moveType,"text",["","○","×","距離次第"])+field("fRemarks","備考",x.remarks,"textarea",null,true);
 }
 
+function progressStatusOptions(current){
+  const values=["",...(state.progressStatuses||[])];
+  if(current&&!values.includes(current))values.push(current);
+  return [...new Set(values)];
+}
+
 function buildProgressForm(x){
   $("formFields").innerHTML=field("fEntry","エントリー月",x.entryMonth)+
     field("fStaff","人員担当者",x.staff,"text",["","山本","白木","吉本","荒井","森田","長崎","上澤","山田"])+
     field("fCompany","所属会社",x.company)+field("fName","名前",x.name)+
     field("fProjectStaff","案件担当者",x.projectStaff,"text",["","山本","白木","吉本","荒井","森田","長崎","上澤","山田"])+
-    field("fUpper","上位会社",x.upperCompany)+field("fStatus","案件進捗",x.status)+field("fArea","エリア",x.area)+field("fRemarks","備考",x.remarks,"textarea",null,true);
+    field("fUpper","上位会社",x.upperCompany)+field("fStatus","案件進捗",x.status,"text",progressStatusOptions(x.status))+field("fArea","エリア",x.area)+field("fRemarks","備考",x.remarks,"textarea",null,true);
 }
 
 async function saveEdit(e){
