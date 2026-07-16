@@ -1,5 +1,5 @@
 window.WONDERCRAFT_CONFIG = {
   APP_NAME: "WonderCraft 人材管理",
-  VERSION: "5.0.0",
-  GAS_API_URL: ""
+  VERSION: "5.4.0",
+  GAS_API_URL: "https://script.google.com/macros/s/AKfycbwvXGHmvtq07Te5E4eD82MnXowODqGkaqFvOSgly0GBovRhlaBVA7DyeUzMk9pOZK4z/exec"
 };
