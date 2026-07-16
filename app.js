@@ -1,10 +1,11 @@
-const state={view:"candidates",candidates:[],progress:[],today:[],selected:null,runtimeConfig:{}};
+/* WonderCraft PWA v6.1.0 - ホーム画面完成版 */
+const state={view:"home",candidates:[],progress:[],today:[],selected:null,runtimeConfig:{}};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
 
 window.addEventListener("load",()=>{
-  setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$("splash")?.remove(),450)},900);
+  setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$('splash')?.remove(),450)},900);
   if("serviceWorker"in navigator)navigator.serviceWorker.register("./service-worker.js").catch(console.error);
   bindEvents();
   initialize();
@@ -12,7 +13,6 @@ window.addEventListener("load",()=>{
 
 function bindEvents(){
   $("systemRetryBtn").onclick=()=>initialize(true);
-  $("settingsBtn").onclick=showDeviceSettings;
   $("reloadBtn").onclick=()=>initialize(true);
   $("searchInput").addEventListener("input",()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(loadCurrent,350)});
   $("staffFilter").onchange=loadCurrent;
@@ -25,19 +25,22 @@ function bindEvents(){
 
 async function initialize(force=false){
   try{
-    hideSystemPanel();
+    if($("appPanel").hidden){
+      $("systemPanel").hidden=false;
+      $("systemTitle").textContent="接続確認中";
+      $("systemMessage").textContent="システムへ接続しています。";
+      $("systemRetryBtn").hidden=true;
+    }else{
+      hideSystemPanel();
+    }
     const api=getApi();
     if(!api||api.includes("ここにGAS")){
-      return showSystemError(
-        "管理者設定エラー",
-        "GASウェブアプリURLが設定されていません。管理者へ連絡してください。"
-      );
+      return showSystemError("管理者設定エラー","GASウェブアプリURLが設定されていません。管理者へ連絡してください。");
     }
 
     ensureDeviceId();
     let token=getToken();
 
-    // 初回は画面を出さず、端末を自動登録する。
     if(!token){
       const oldPin=localStorage.getItem("wc_pin")||"";
       try{
@@ -50,24 +53,18 @@ async function initialize(force=false){
     }
 
     state.runtimeConfig=await apiGet("config",{},api,token);
-
     if(state.runtimeConfig.maintenance){
-      return showMaintenance(
-        state.runtimeConfig.maintenanceMessage||"現在メンテナンス中です。"
-      );
+      return showMaintenance(state.runtimeConfig.maintenanceMessage||"現在メンテナンス中です。");
     }
 
     $("appPanel").hidden=false;
     hideSystemPanel();
-
-    if(force){
-      setStatus("最新設定を読み込みました。");
-    }
+    if(force)setStatus("最新情報を読み込みました。");
 
     await loadFilters();
     await loadDashboard();
+    applyViewState();
     await loadCurrent();
-
   }catch(error){
     if(isDeviceAuthError(error)){
       clearToken();
@@ -78,189 +75,83 @@ async function initialize(force=false){
         return showEnrollmentError(enrollError);
       }
     }
-
     showSystemError("接続エラー",error.message||"システムへ接続できませんでした。");
   }
 }
 
-function getApi(){
-  return String(config.GAS_API_URL||"").trim().replace(/\/+$/,"");
-}
-
-function ensureDeviceId(){
-  let id=localStorage.getItem("wc_device_id");
-  if(!id){
-    id=(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    localStorage.setItem("wc_device_id",id);
-  }
-  return id;
-}
-
-function getDeviceName(){
-  const platform=navigator.userAgentData?.platform||navigator.platform||"端末";
-  const mobile=/iPhone|iPad|Android|Mobile/i.test(navigator.userAgent)?"スマホ":"PC";
-  return `${mobile} / ${platform}`.slice(0,100);
-}
-
-function getToken(){
-  return localStorage.getItem("wc_device_token")||"";
-}
-
-function saveToken(token){
-  localStorage.setItem("wc_device_token",token);
-}
-
-function clearToken(){
-  localStorage.removeItem("wc_device_token");
-}
+function getApi(){return String(config.GAS_API_URL||"").trim().replace(/\/+$/,"")}
+function ensureDeviceId(){let id=localStorage.getItem("wc_device_id");if(!id){id=(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`);localStorage.setItem("wc_device_id",id)}return id}
+function getDeviceName(){const platform=navigator.userAgentData?.platform||navigator.platform||"端末";const mobile=/iPhone|iPad|Android|Mobile/i.test(navigator.userAgent)?"スマホ":"PC";return `${mobile} / ${platform}`.slice(0,100)}
+function getToken(){return localStorage.getItem("wc_device_token")||""}
+function saveToken(token){localStorage.setItem("wc_device_token",token)}
+function clearToken(){localStorage.removeItem("wc_device_token")}
 
 async function enrollDevice(pin=""){
-  const api=getApi();
-  const url=new URL(api);
+  const url=new URL(getApi());
   url.searchParams.set("api","1");
   url.searchParams.set("action","enroll");
   url.searchParams.set("deviceId",ensureDeviceId());
   url.searchParams.set("deviceName",getDeviceName());
   if(pin)url.searchParams.set("pin",pin);
-
-  const response=await fetch(url.toString(),{
-    redirect:"follow",
-    cache:"no-store"
-  });
+  const response=await fetch(url.toString(),{redirect:"follow",cache:"no-store"});
   const json=await response.json();
-
-  if(!json.success){
-    const error=new Error(json.error||"端末登録に失敗しました。");
-    error.code=json.code||"ENROLL_ERROR";
-    throw error;
-  }
-
-  saveToken(json.data.token);
-  state.runtimeConfig=json.data.config||{};
-  return json.data;
+  if(!json.success){const error=new Error(json.error||"端末登録に失敗しました。");error.code=json.code||"ENROLL_ERROR";throw error}
+  saveToken(json.data.token);state.runtimeConfig=json.data.config||{};return json.data;
 }
 
-function hideSystemPanel(){
-  const panel=$("systemPanel");
-  if(panel)panel.hidden=true;
-}
-
-function showSystemError(title,message){
-  $("appPanel").hidden=true;
-  $("systemPanel").hidden=false;
-  $("systemTitle").textContent=title||"エラー";
-  $("systemMessage").textContent=message||"システムへ接続できませんでした。";
-  $("systemRetryBtn").hidden=false;
-}
-
-function showEnrollmentError(error){
-  const code=error&&error.code?error.code:"";
-  let message=error&&error.message?error.message:"端末の自動登録に失敗しました。";
-
-  if(code==="ENROLL_ERROR"||message.includes("PIN")){
-    message="端末の自動登録が許可されていません。管理者に PWA_AUTO_ENROLL の設定確認を依頼してください。";
-  }
-
-  showSystemError("端末登録エラー",message);
-}
-
-function showDeviceSettings(){
-  const deviceId=localStorage.getItem("wc_device_id")||"";
-  const deviceName=state.runtimeConfig.deviceName||getDeviceName();
-  alert(
-    `端末登録済みです。\n\n端末名：${deviceName}\n端末ID：${deviceId.slice(0,12)}…\n\n設定変更は管理者側から自動反映されます。`
-  );
-}
-
-function showMaintenance(message){
-  $("appPanel").hidden=true;
-  $("systemPanel").hidden=false;
-  $("systemTitle").textContent="メンテナンス中";
-  $("systemMessage").textContent=message||"現在メンテナンス中です。";
-  $("systemRetryBtn").hidden=true;
-}
-
-function isDeviceAuthError(error){
-  return [
-    "DEVICE_ENROLL_REQUIRED",
-    "DEVICE_TOKEN_INVALID",
-    "DEVICE_TOKEN_EXPIRED",
-    "DEVICE_DISABLED"
-  ].includes(error.code);
-}
+function hideSystemPanel(){if($("systemPanel"))$("systemPanel").hidden=true}
+function showSystemError(title,message){$("appPanel").hidden=true;$("systemPanel").hidden=false;$("systemTitle").textContent=title||"エラー";$("systemMessage").textContent=message||"システムへ接続できませんでした。";$("systemRetryBtn").hidden=false}
+function showEnrollmentError(error){const code=error&&error.code?error.code:"";let message=error&&error.message?error.message:"端末の自動登録に失敗しました。";if(code==="ENROLL_ERROR"||message.includes("PIN"))message="端末の自動登録が許可されていません。管理者に PWA_AUTO_ENROLL の設定確認を依頼してください。";showSystemError("端末登録エラー",message)}
+function showMaintenance(message){$("appPanel").hidden=true;$("systemPanel").hidden=false;$("systemTitle").textContent="メンテナンス中";$("systemMessage").textContent=message||"現在メンテナンス中です。";$("systemRetryBtn").hidden=true}
+function isDeviceAuthError(error){return ["DEVICE_ENROLL_REQUIRED","DEVICE_TOKEN_INVALID","DEVICE_TOKEN_EXPIRED","DEVICE_DISABLED"].includes(error.code)}
 
 async function apiGet(action,params={},api=getApi(),token=getToken()){
-  const url=new URL(api);
-  url.searchParams.set("api","1");
-  url.searchParams.set("action",action);
-  url.searchParams.set("token",token);
-
-  Object.entries(params).forEach(([key,value])=>{
-    if(value!==undefined&&value!==null&&String(value)!==""){
-      url.searchParams.set(key,value);
-    }
-  });
-
-  const response=await fetch(url.toString(),{
-    redirect:"follow",
-    cache:"no-store"
-  });
+  const url=new URL(api);url.searchParams.set("api","1");url.searchParams.set("action",action);url.searchParams.set("token",token);
+  Object.entries(params).forEach(([key,value])=>{if(value!==undefined&&value!==null&&String(value)!=="")url.searchParams.set(key,value)});
+  const response=await fetch(url.toString(),{redirect:"follow",cache:"no-store"});
   const json=await response.json();
-
-  if(!json.success){
-    const error=new Error(json.error||"APIエラー");
-    error.code=json.code||"API_ERROR";
-    throw error;
-  }
-
+  if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
   return json.data;
 }
 
 async function apiPost(action,payload){
-  const response=await fetch(getApi(),{
-    method:"POST",
-    redirect:"follow",
-    headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify({
-      wc_api:true,
-      action,
-      token:getToken(),
-      payload
-    })
-  });
-
+  const response=await fetch(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,token:getToken(),payload})});
   const json=await response.json();
-
-  if(!json.success){
-    const error=new Error(json.error||"APIエラー");
-    error.code=json.code||"API_ERROR";
-    throw error;
-  }
-
+  if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
   return json.data;
 }
 
-async function loadFilters(){
-  try{
-    const o=await apiGet("filters");
-    fillSelect("staffFilter",o.staff||[],"担当者：全員");
-    fillSelect("regionFilter",o.regions||[],"地域：すべて");
-  }catch(e){showError(e)}
-}
-
-function fillSelect(id,items,first){
-  const el=$(id),old=el.value;el.innerHTML=`<option value="">${first}</option>`;
-  items.forEach(v=>el.insertAdjacentHTML("beforeend",`<option value="${esc(v)}">${esc(v)}</option>`));el.value=old;
-}
-
+async function loadFilters(){try{const o=await apiGet("filters");fillSelect("staffFilter",o.staff||[],"担当者：全員");fillSelect("regionFilter",o.regions||[],"地域：すべて")}catch(e){showError(e)}}
+function fillSelect(id,items,first){const el=$(id),old=el.value;el.innerHTML=`<option value="">${first}</option>`;items.forEach(v=>el.insertAdjacentHTML("beforeend",`<option value="${esc(v)}">${esc(v)}</option>`));el.value=old}
 async function loadDashboard(){try{renderDashboard(await apiGet("dashboard"))}catch(e){showError(e)}}
 function renderDashboard(d){$("countCandidates").textContent=d.candidates??"-";$("countProgress").textContent=d.progress??"-";$("countToday").textContent=d.todayInterviews??"-";$("countWaiting").textContent=d.waitingCandidates??"-"}
 
 function switchView(view){
+  if(!["home","candidates","progress"].includes(view))view="home";
   state.view=view;
-  document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===view));
-  $("regionFilter").disabled=view!=="candidates";
+  applyViewState();
   loadCurrent();
+}
+
+function applyViewState(){
+  document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===state.view));
+  const isHome=state.view==="home";
+  $("dashboardSection").hidden=!isHome;
+  $("homeHeader").hidden=!isHome;
+  $("listHeader").hidden=isHome;
+  $("filterSection").hidden=isHome;
+
+  if(state.view==="candidates"){
+    $("viewTitle").textContent="求職者";
+    $("viewDescription").textContent="求職者を検索・編集できます。";
+    $("searchInput").placeholder="名前・駅・会社・進捗を検索";
+    $("regionFilter").disabled=false;
+  }else if(state.view==="progress"){
+    $("viewTitle").textContent="案件進捗";
+    $("viewDescription").textContent="案件状況を検索・編集できます。";
+    $("searchInput").placeholder="氏名・会社・案件進捗を検索";
+    $("regionFilter").disabled=true;
+  }
 }
 
 async function loadCurrent(){
@@ -268,9 +159,17 @@ async function loadCurrent(){
   showLoading();
   try{
     const p={q:$("searchInput").value,staff:$("staffFilter").value};
-    if(state.view==="candidates"){p.region=$("regionFilter").value;state.candidates=await apiGet("candidates",p);renderCandidates(state.candidates)}
-    else if(state.view==="progress"){state.progress=await apiGet("progress",p);renderProgress(state.progress)}
-    else{state.today=await apiGet("today");renderToday(state.today)}
+    if(state.view==="home"){
+      state.today=await apiGet("today");
+      renderToday(state.today);
+    }else if(state.view==="candidates"){
+      p.region=$("regionFilter").value;
+      state.candidates=await apiGet("candidates",p);
+      renderCandidates(state.candidates);
+    }else{
+      state.progress=await apiGet("progress",p);
+      renderProgress(state.progress);
+    }
     loadDashboard();
   }catch(e){showError(e)}
 }
@@ -286,8 +185,36 @@ function renderProgress(items){
 }
 
 function renderToday(items){
-  setStatus(`${items.length}件`);if(!items.length)return showEmpty("本日の面談はありません。");
-  $("cards").innerHTML=items.map(x=>`<article class="card"><h3>${esc(x.name||"名前未入力")}</h3><span class="badge">${esc(x.interviewDate)}</span><span class="badge">${esc(x.status||"進捗未設定")}</span><div class="details">${rows([["担当者",x.staff],["案件担当者",x.projectStaff],["会社",x.company]])}</div>${x.remarks?`<div class="remarks">${esc(x.remarks)}</div>`:""}</article>`).join("");
+  const sorted=[...(items||[])].sort((a,b)=>String(a.interviewTime||"99:99").localeCompare(String(b.interviewTime||"99:99"),"ja"));
+  setStatus(`${sorted.length}件`);
+  if(!sorted.length)return showEmpty("本日の面談はありません。");
+
+  $("cards").innerHTML=sorted.map(x=>{
+    const time=normalizeInterviewTime(x.interviewTime||x.interviewDate);
+    return `<article class="card interview-card">
+      <div class="interview-time"><strong>${esc(time||"時間未定")}</strong><span>面談</span></div>
+      <div class="interview-body">
+        <h3>${esc(x.name||"名前未入力")}</h3>
+        <span class="badge">${esc(x.status||"進捗未設定")}</span>
+        <div class="details interview-details">${rows([
+          ["人員担当者",x.staff],
+          ["案件担当者",x.projectStaff],
+          ["所属会社",x.company],
+          ["上位会社",x.upperCompany],
+          ["案件進捗",x.status]
+        ])}</div>
+      </div>
+    </article>`;
+  }).join("");
+}
+
+function normalizeInterviewTime(value){
+  const text=String(value||"").normalize("NFKC");
+  const match=text.match(/(?:^|\D)([01]?\d|2[0-3]):([0-5]\d)(?:\D|$)/);
+  if(match)return `${String(match[1]).padStart(2,"0")}:${match[2]}`;
+  const jp=text.match(/([01]?\d|2[0-3])時(?:\s*([0-5]?\d)分?)?/);
+  if(jp)return `${String(jp[1]).padStart(2,"0")}:${String(jp[2]||"00").padStart(2,"0")}`;
+  return text.trim();
 }
 
 function rows(arr){return arr.map(([a,b])=>`<div class="label">${esc(a)}</div><div>${esc(b||"")}</div>`).join("")}
@@ -295,7 +222,7 @@ function openCandidate(i){state.selected={type:"candidate",item:state.candidates
 function openProgress(i){state.selected={type:"progress",item:state.progress[i]};$("modalTitle").textContent="案件進捗を編集";$("copyProposalBtn").hidden=true;buildProgressForm(state.selected.item);openModal()}
 
 function field(id,label,value,type="text",options=null,full=false){
-  const cls=full?" class=\"full\"":"";
+  const cls=full?' class="full"':"";
   if(options)return `<label${cls}>${label}<select id="${id}">${options.map(v=>`<option value="${esc(v)}"${v===value?" selected":""}>${esc(v)}</option>`).join("")}</select></label>`;
   if(type==="textarea")return `<label${cls}>${label}<textarea id="${id}">${esc(value||"")}</textarea></label>`;
   return `<label${cls}>${label}<input id="${id}" type="${type}" value="${esc(value||"")}"></label>`;
@@ -314,10 +241,10 @@ function buildCandidateForm(x){
 
 function buildProgressForm(x){
   $("formFields").innerHTML=field("fEntry","エントリー月",x.entryMonth)+
-  field("fStaff","人員担当者",x.staff,"text",["","山本","白木","吉本","荒井","森田","長崎","上澤","山田"])+
-  field("fCompany","所属会社",x.company)+field("fName","名前",x.name)+
-  field("fProjectStaff","案件担当者",x.projectStaff,"text",["","山本","白木","吉本","荒井","森田","長崎","上澤","山田"])+
-  field("fUpper","上位会社",x.upperCompany)+field("fStatus","案件進捗",x.status)+field("fArea","エリア",x.area)+field("fRemarks","備考",x.remarks,"textarea",null,true);
+    field("fStaff","人員担当者",x.staff,"text",["","山本","白木","吉本","荒井","森田","長崎","上澤","山田"])+
+    field("fCompany","所属会社",x.company)+field("fName","名前",x.name)+
+    field("fProjectStaff","案件担当者",x.projectStaff,"text",["","山本","白木","吉本","荒井","森田","長崎","上澤","山田"])+
+    field("fUpper","上位会社",x.upperCompany)+field("fStatus","案件進捗",x.status)+field("fArea","エリア",x.area)+field("fRemarks","備考",x.remarks,"textarea",null,true);
 }
 
 async function saveEdit(e){
@@ -334,13 +261,7 @@ async function saveEdit(e){
   }catch(err){setMsg("modalMessage",err.message,"error")}
 }
 
-async function copyProposal(){
-  try{
-    const p={station:v("fStation"),prefecture:v("fPref"),career:v("fCareer"),experience:v("fExp"),remarks:v("fRemarks"),startDate:v("fStart"),price:v("fPrice")};
-    const text=await apiPost("proposalText",p);await navigator.clipboard.writeText(text);setMsg("modalMessage","紹介文をコピーしました。","success");
-  }catch(e){setMsg("modalMessage",e.message,"error")}
-}
-
+async function copyProposal(){try{const p={station:v("fStation"),prefecture:v("fPref"),career:v("fCareer"),experience:v("fExp"),remarks:v("fRemarks"),startDate:v("fStart"),price:v("fPrice")};const text=await apiPost("proposalText",p);await navigator.clipboard.writeText(text);setMsg("modalMessage","紹介文をコピーしました。","success")}catch(e){setMsg("modalMessage",e.message,"error")}}
 function v(id){return $(id)?.value||""}
 function openModal(){$("modal").hidden=false;document.body.style.overflow="hidden";setMsg("modalMessage","")}
 function closeModal(){$("modal").hidden=true;document.body.style.overflow=""}

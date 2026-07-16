@@ -1,23 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0A3478">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="WonderCraft">
   <title>WonderCraft 人材管理</title>
   <link rel="manifest" href="./manifest.json">
-  <link rel="icon" type="image/x-icon" href="./assets/favicon.ico">
-  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="./assets/favicon-16x16.png">
-  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css">
-<script src="./config.js"></script>
+  <link rel="icon" href="./assets/icon-192.png">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="stylesheet" href="./style.css?v=6.1.0">
 </head>
 <body>
-  <div id="splash" class="splash">
+  <div id="splash" class="splash" aria-hidden="true">
     <img src="./assets/icon-512.png" alt="WonderCraft">
     <h1>Wonder Craft</h1>
     <p>人材管理システム</p>
@@ -25,68 +22,92 @@
 
   <header class="topbar">
     <div class="brand">
-      <img src="./assets/header-logo.png" alt="WC">
-      <div><small>WonderCraft</small><strong>人材管理</strong></div>
+      <img src="./assets/icon-192.png" alt="WC">
+      <div>
+        <small>WonderCraft</small>
+        <strong>人材管理</strong>
+      </div>
     </div>
-    <button id="reloadBtn" class="icon-btn">↻</button>
+    <button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button>
   </header>
 
   <main>
-    <section id="systemPanel" class="setup-panel system-panel" hidden>
+    <section id="systemPanel" class="setup-panel" aria-live="polite">
       <h2 id="systemTitle">接続確認中</h2>
       <p id="systemMessage">システムへ接続しています。</p>
-      <button id="systemRetryBtn" class="primary">再試行</button>
+      <button id="systemRetryBtn" class="primary" type="button" hidden>再試行</button>
     </section>
 
     <section id="appPanel" hidden>
-      <section class="dashboard">
-        <article><span>求職者</span><strong id="countCandidates">-</strong></article>
-        <article><span>案件進捗</span><strong id="countProgress">-</strong></article>
-        <article><span>本日の面談</span><strong id="countToday">-</strong></article>
-        <article><span>案件待ち</span><strong id="countWaiting">-</strong></article>
+      <section id="dashboardSection" class="home-dashboard" aria-label="全体件数">
+        <div class="dashboard">
+          <article><span>求職者</span><strong id="countCandidates">-</strong></article>
+          <article><span>案件進捗</span><strong id="countProgress">-</strong></article>
+          <article><span>本日の面談</span><strong id="countToday">-</strong></article>
+          <article><span>案件待ち</span><strong id="countWaiting">-</strong></article>
+        </div>
       </section>
 
-      <section class="filters">
-        <input id="searchInput" type="search" placeholder="名前・駅・会社・進捗を検索">
-        <select id="staffFilter"><option value="">担当者：全員</option></select>
-        <select id="regionFilter"><option value="">地域：すべて</option></select>
+      <section id="homeHeader" class="home-header">
+        <div>
+          <p class="eyebrow">TODAY</p>
+          <h1>本日の面談</h1>
+          <p>会社全体の予定を時間順に表示しています。</p>
+        </div>
       </section>
 
-      <nav class="tabs">
-        <button class="active" data-view="candidates">求職者</button>
-        <button data-view="progress">案件進捗</button>
-        <button data-view="today">本日の面談</button>
-      </nav>
+      <section id="listHeader" class="list-header" hidden>
+        <h1 id="viewTitle">求職者</h1>
+        <p id="viewDescription">求職者を検索・編集できます。</p>
+      </section>
 
-      <div id="status" class="status"></div>
-      <section id="cards" class="cards"></section>
+      <section id="filterSection" class="filters" hidden>
+        <input id="searchInput" type="search" placeholder="名前・駅・会社・進捗を検索" autocomplete="off">
+        <select id="staffFilter" aria-label="担当者で絞り込み">
+          <option value="">担当者：全員</option>
+        </select>
+        <select id="regionFilter" aria-label="地域で絞り込み">
+          <option value="">地域：すべて</option>
+        </select>
+      </section>
+
+      <div id="status" class="status" aria-live="polite"></div>
+      <section id="cards" class="cards" aria-live="polite"></section>
     </section>
   </main>
 
   <div id="modal" class="modal" hidden>
     <div class="backdrop" data-close></div>
-    <section class="modal-panel">
-      <header><h2 id="modalTitle">編集</h2><button data-close>×</button></header>
+    <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <header>
+        <h2 id="modalTitle">編集</h2>
+        <button type="button" data-close aria-label="閉じる">×</button>
+      </header>
       <form id="editForm">
         <div id="formFields" class="form-grid"></div>
-        <div id="modalMessage" class="message"></div>
+        <div id="modalMessage" class="message" aria-live="polite"></div>
         <footer>
-          <button type="button" id="copyProposalBtn" class="secondary">紹介文コピー</button>
-          <button type="button" data-close class="secondary">キャンセル</button>
-          <button type="submit" class="primary">保存</button>
+          <button id="copyProposalBtn" class="secondary" type="button">紹介文コピー</button>
+          <button class="secondary" type="button" data-close>キャンセル</button>
+          <button class="primary" type="submit">保存</button>
         </footer>
       </form>
     </section>
   </div>
 
-  <nav class="bottom-nav">
-    <button class="active" data-view="candidates">求職者</button>
-    <button data-view="progress">案件</button>
-    <button data-view="today">面談</button>
-    <button id="settingsBtn">設定</button>
+  <nav class="bottom-nav" aria-label="メインメニュー">
+    <button class="active" type="button" data-view="home" aria-label="ホーム">
+      <span class="nav-icon">⌂</span><span>ホーム</span>
+    </button>
+    <button type="button" data-view="candidates" aria-label="求職者">
+      <span class="nav-icon">♙</span><span>求職者</span>
+    </button>
+    <button type="button" data-view="progress" aria-label="案件進捗">
+      <span class="nav-icon">▣</span><span>案件進捗</span>
+    </button>
   </nav>
 
-  <script src="./config.js"></script>
-  <script src="./app.js"></script>
+  <script src="./config.js?v=6.1.0"></script>
+  <script src="./app.js?v=6.1.0"></script>
 </body>
 </html>

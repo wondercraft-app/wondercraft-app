@@ -1,1 +1,36 @@
-const CACHE="wondercraft-v5-device-token-1";const FILES=["./","./index.html","./style.css","./config.js","./app.js","./manifest.json","./assets/icon-192.png","./assets/icon-512.png","./assets/icon-1024.png"];self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)));self.skipWaiting()});self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==CACHE).map(x=>caches.delete(x)))));self.clients.claim()});self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request).then(r=>{const c=r.clone();caches.open(CACHE).then(x=>x.put(e.request,c));return r}).catch(()=>caches.match(e.request)))});
+const CACHE="wondercraft-v6-1-home";
+const FILES=[
+  "./",
+  "./index.html",
+  "./style.css?v=6.1.0",
+  "./config.js?v=6.1.0",
+  "./app.js?v=6.1.0",
+  "./manifest.json",
+  "./offline.html",
+  "./assets/icon-192.png",
+  "./assets/icon-512.png",
+  "./assets/icon-1024.png"
+];
+
+self.addEventListener("install",event=>{
+  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)));
+  self.skipWaiting();
+});
+
+self.addEventListener("activate",event=>{
+  event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))));
+  self.clients.claim();
+});
+
+self.addEventListener("fetch",event=>{
+  if(event.request.method!=="GET")return;
+  event.respondWith(
+    fetch(event.request)
+      .then(response=>{
+        const copy=response.clone();
+        caches.open(CACHE).then(cache=>cache.put(event.request,copy));
+        return response;
+      })
+      .catch(()=>caches.match(event.request).then(cached=>cached||caches.match("./offline.html")))
+  );
+});
