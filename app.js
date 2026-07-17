@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-6.3.1 - 求職者経験検索・スキルシートURL対応 */
+/* WonderCraft PWA WC-6.3.2 - 求職者経験検索・スキルシートURL対応 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{}};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
