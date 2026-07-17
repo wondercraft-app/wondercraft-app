@@ -3,6 +3,7 @@ const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
+let loadRequestId=0;
 
 window.addEventListener("load",()=>{
   setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$('splash')?.remove(),450)},900);
@@ -53,19 +54,26 @@ async function initialize(force=false){
       }
     }
 
-    state.runtimeConfig=await apiGet("config",{},api,token);
+    const bootstrap=await apiGet("bootstrap",{},api,token);
+    state.runtimeConfig=bootstrap.config||{};
     if(state.runtimeConfig.maintenance){
       return showMaintenance(state.runtimeConfig.maintenanceMessage||"現在メンテナンス中です。");
     }
+
+    const filters=bootstrap.filters||{};
+    state.progressStatuses=filters.progressStatuses||[];
+    fillSelect("staffFilter",filters.staff||[],"担当者：全員");
+    fillSelect("regionFilter",filters.regions||[],"地域：すべて");
+    renderDashboard(bootstrap.dashboard||{});
+    state.today=bootstrap.today||[];
 
     $("appPanel").hidden=false;
     hideSystemPanel();
     if(force)setStatus("最新情報を読み込みました。");
 
-    await loadFilters();
-    await loadDashboard();
     applyViewState();
-    await loadCurrent();
+    if(state.view==="home")renderToday(state.today);
+    else await loadCurrent();
   }catch(error){
     if(isDeviceAuthError(error)){
       clearToken();
@@ -157,22 +165,26 @@ function applyViewState(){
 
 async function loadCurrent(){
   if($("appPanel").hidden)return;
+  const requestId=++loadRequestId;
   showLoading();
   try{
     const p={q:$("searchInput").value,staff:$("staffFilter").value};
+    let items;
     if(state.view==="home"){
-      state.today=await apiGet("today");
-      renderToday(state.today);
+      items=await apiGet("today");
+      if(requestId!==loadRequestId)return;
+      state.today=items;renderToday(items);
     }else if(state.view==="candidates"){
       p.region=$("regionFilter").value;
-      state.candidates=await apiGet("candidates",p);
-      renderCandidates(state.candidates);
+      items=await apiGet("candidates",p);
+      if(requestId!==loadRequestId)return;
+      state.candidates=items;renderCandidates(items);
     }else{
-      state.progress=await apiGet("progress",p);
-      renderProgress(state.progress);
+      items=await apiGet("progress",p);
+      if(requestId!==loadRequestId)return;
+      state.progress=items;renderProgress(items);
     }
-    loadDashboard();
-  }catch(e){showError(e)}
+  }catch(e){if(requestId===loadRequestId)showError(e)}
 }
 
 function renderCandidates(items){
@@ -264,7 +276,7 @@ async function saveEdit(e){
       const x=state.selected.item;
       await apiPost("updateProgress",{rowNumber:x.rowNumber,originalName:x.name,entryMonth:v("fEntry"),staff:v("fStaff"),company:v("fCompany"),name:v("fName"),projectStaff:v("fProjectStaff"),upperCompany:v("fUpper"),status:v("fStatus"),area:v("fArea"),remarks:v("fRemarks")});
     }
-    setMsg("modalMessage","更新しました。","success");setTimeout(()=>{closeModal();loadCurrent()},500);
+    setMsg("modalMessage","更新しました。","success");setTimeout(()=>{closeModal();loadDashboard();loadCurrent()},500);
   }catch(err){setMsg("modalMessage",err.message,"error")}
 }
 
