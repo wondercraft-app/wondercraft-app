@@ -25,7 +25,7 @@
       <img src="./assets/icon-192.png" alt="WC">
       <div>
         <small>WonderCraft</small>
-        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-6.3</span></div>
+        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-6.3.1</span></div>
       </div>
     </div>
     <button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button>
@@ -69,17 +69,17 @@
         <select id="regionFilter" aria-label="地域で絞り込み">
           <option value="">地域：すべて</option>
         </select>
-        <select id="experienceTypeFilter" aria-label="経験区分で絞り込み">
+        <select id="experienceFilter" aria-label="経験区分で絞り込み">
           <option value="">経験区分：指定なし</option>
-          <option value="経験者">経験者</option>
-          <option value="未経験者">未経験者</option>
+          <option value="experienced">経験者</option>
+          <option value="inexperienced">未経験者</option>
         </select>
         <select id="careerFilter" aria-label="経験キャリアで絞り込み">
           <option value="">経験キャリア：指定なし</option>
           <option value="docomo">ドコモ</option>
-          <option value="SB/Y">SB</option>
-          <option value="au/UQ">au</option>
-          <option value="楽天">楽天</option>
+          <option value="sb">SB</option>
+          <option value="au">au</option>
+          <option value="rakuten">楽天</option>
         </select>
       </section>
 
@@ -99,7 +99,8 @@
         <div id="formFields" class="form-grid"></div>
         <div id="modalMessage" class="message" aria-live="polite"></div>
         <footer>
-          <button id="copyProposalBtn" class="secondary" type="button">紹介文コピー</button>
+          <button id="openSkillSheetBtn" class="secondary" type="button" hidden>スキルシートを開く</button>
+          <button id="copyProposalBtn" class="secondary" type="button">紹介文をコピー</button>
           <button class="secondary" type="button" data-close>キャンセル</button>
           <button class="primary" type="submit">保存</button>
         </footer>
