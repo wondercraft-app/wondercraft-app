@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-6.2 - 案件進捗プルダウン・LINE更新対応 */
+/* WonderCraft PWA WC-6.3 - 求職者経験検索・スキルシートURL対応 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{}};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -19,10 +19,13 @@ function bindEvents(){
   $("searchInput").addEventListener("input",()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(loadCurrent,350)});
   $("staffFilter").onchange=loadCurrent;
   $("regionFilter").onchange=loadCurrent;
+  $("experienceFilter").onchange=loadCurrent;
+  $("careerFilter").onchange=loadCurrent;
   document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>switchView(b.dataset.view));
   document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeModal);
   $("editForm").onsubmit=saveEdit;
   $("copyProposalBtn").onclick=copyProposal;
+  $("openSkillSheetBtn").onclick=openSkillSheet;
 }
 
 async function initialize(force=false){
@@ -155,11 +158,15 @@ function applyViewState(){
     $("viewDescription").textContent="求職者を検索・編集できます。";
     $("searchInput").placeholder="名前・駅・会社・進捗を検索";
     $("regionFilter").disabled=false;
+    $("experienceFilter").hidden=false;
+    $("careerFilter").hidden=false;
   }else if(state.view==="progress"){
     $("viewTitle").textContent="案件進捗";
     $("viewDescription").textContent="案件状況を検索・編集できます。";
     $("searchInput").placeholder="氏名・会社・案件進捗を検索";
     $("regionFilter").disabled=true;
+    $("experienceFilter").hidden=true;
+    $("careerFilter").hidden=true;
   }
 }
 
@@ -176,6 +183,8 @@ async function loadCurrent(){
       state.today=items;renderToday(items);
     }else if(state.view==="candidates"){
       p.region=$("regionFilter").value;
+      p.experienceType=$("experienceFilter").value;
+      p.careerType=$("careerFilter").value;
       items=await apiGet("candidates",p);
       if(requestId!==loadRequestId)return;
       state.candidates=items;renderCandidates(items);
@@ -231,8 +240,8 @@ function normalizeInterviewTime(value){
 }
 
 function rows(arr){return arr.map(([a,b])=>`<div class="label">${esc(a)}</div><div>${esc(b||"")}</div>`).join("")}
-function openCandidate(i){state.selected={type:"candidate",item:state.candidates[i]};$("modalTitle").textContent="求職者を編集";$("copyProposalBtn").hidden=false;buildCandidateForm(state.selected.item);openModal()}
-function openProgress(i){state.selected={type:"progress",item:state.progress[i]};$("modalTitle").textContent="案件進捗を編集";$("copyProposalBtn").hidden=true;buildProgressForm(state.selected.item);openModal()}
+function openCandidate(i){state.selected={type:"candidate",item:state.candidates[i]};$("modalTitle").textContent="求職者を編集";$("copyProposalBtn").hidden=false;buildCandidateForm(state.selected.item);updateSkillSheetButton();openModal()}
+function openProgress(i){state.selected={type:"progress",item:state.progress[i]};$("modalTitle").textContent="案件進捗を編集";$("copyProposalBtn").hidden=true;$("openSkillSheetBtn").hidden=true;buildProgressForm(state.selected.item);openModal()}
 
 function field(id,label,value,type="text",options=null,full=false){
   const cls=full?' class="full"':"";
@@ -241,15 +250,37 @@ function field(id,label,value,type="text",options=null,full=false){
   return `<label${cls}>${label}<input id="${id}" type="${type}" value="${esc(value||"")}"></label>`;
 }
 
+function careerChecks(value){
+  const selected=normalizeCareerSelections(value);
+  const options=[["docomo","ドコモ"],["sb","SB"],["au","au"],["rakuten","楽天"]];
+  return `<fieldset class="full check-group"><legend>経験キャリア（複数選択可）</legend><div>${options.map(([key,label])=>`<label><input type="checkbox" name="careerExperience" value="${key}"${selected.includes(key)?" checked":""}>${label}</label>`).join("")}</div></fieldset>`;
+}
+function normalizeCareerSelections(value){
+  const text=String(value||"").normalize("NFKC").toLowerCase();
+  const out=[];
+  if(/docomo|ドコモ|d経験/.test(text))out.push("docomo");
+  if(/softbank|ソフトバンク|sb|s経験|ym|y!mobile|ymobile|ワイモバ|yモバ/.test(text))out.push("sb");
+  if(/(?:^|[^a-z])au(?:[^a-z]|$)|uq|uｑ|au経験/.test(text))out.push("au");
+  if(/rakuten|楽天|r経験/.test(text))out.push("rakuten");
+  return [...new Set(out)];
+}
+function selectedCareerValue(){
+  const labels={docomo:"ドコモ",sb:"SB",au:"au",rakuten:"楽天"};
+  return [...document.querySelectorAll('input[name="careerExperience"]:checked')].map(el=>labels[el.value]).filter(Boolean).join(",");
+}
+
 function buildCandidateForm(x){
   $("formFields").innerHTML=
     field("fStaff","担当者",x.staff,"text",["","山本","白木","吉本","荒井","森田","長崎","上澤","山田"])+
     field("fName","名前",x.name)+field("fPref","都道府県",x.prefecture)+field("fStation","最寄駅",x.station)+
     field("fCompany","提案元会社",x.company)+field("fPrice","希望単価",x.price)+
-    field("fCareer","キャリア",x.career,"text",["","SB/Y","au/UQ","docomo","楽天"])+
+    careerChecks(x.career)+
     field("fExp","経験値",x.experience,"text",["","通信経験者","通信未経験","通信微経験","コール経験者","コール未経験"])+
     field("fStart","開始希望",x.startDate)+field("fProg","進捗",x.progress)+
-    field("fMove","移動型可否",x.moveType,"text",["","○","×","距離次第"])+field("fRemarks","備考",x.remarks,"textarea",null,true);
+    field("fMove","移動型可否",x.moveType,"text",["","○","×","距離次第"])+
+    field("fSkillSheetUrl","スキルシートURL",x.skillSheetUrl||"","url",null,true)+
+    field("fRemarks","備考",x.remarks,"textarea",null,true);
+  $("fSkillSheetUrl")?.addEventListener("input",updateSkillSheetButton);
 }
 
 function progressStatusOptions(current){
@@ -271,7 +302,7 @@ async function saveEdit(e){
   try{
     if(state.selected.type==="candidate"){
       const x=state.selected.item;
-      await apiPost("updateCandidate",{sheetName:x.sheetName,rowNumber:x.rowNumber,originalName:x.name,staff:v("fStaff"),name:v("fName"),prefecture:v("fPref"),station:v("fStation"),company:v("fCompany"),price:v("fPrice"),career:v("fCareer"),experience:v("fExp"),startDate:v("fStart"),progress:v("fProg"),moveType:v("fMove"),remarks:v("fRemarks")});
+      await apiPost("updateCandidate",{sheetName:x.sheetName,rowNumber:x.rowNumber,originalName:x.name,staff:v("fStaff"),name:v("fName"),prefecture:v("fPref"),station:v("fStation"),company:v("fCompany"),price:v("fPrice"),career:selectedCareerValue(),experience:v("fExp"),startDate:v("fStart"),progress:v("fProg"),moveType:v("fMove"),skillSheetUrl:v("fSkillSheetUrl"),remarks:v("fRemarks")});
     }else{
       const x=state.selected.item;
       await apiPost("updateProgress",{rowNumber:x.rowNumber,originalName:x.name,entryMonth:v("fEntry"),staff:v("fStaff"),company:v("fCompany"),name:v("fName"),projectStaff:v("fProjectStaff"),upperCompany:v("fUpper"),status:v("fStatus"),area:v("fArea"),remarks:v("fRemarks")});
@@ -280,7 +311,15 @@ async function saveEdit(e){
   }catch(err){setMsg("modalMessage",err.message,"error")}
 }
 
-async function copyProposal(){try{const p={station:v("fStation"),prefecture:v("fPref"),career:v("fCareer"),experience:v("fExp"),remarks:v("fRemarks"),startDate:v("fStart"),price:v("fPrice")};const text=await apiPost("proposalText",p);await navigator.clipboard.writeText(text);setMsg("modalMessage","紹介文をコピーしました。","success")}catch(e){setMsg("modalMessage",e.message,"error")}}
+async function copyProposal(){try{const p={station:v("fStation"),prefecture:v("fPref"),career:selectedCareerValue(),experience:v("fExp"),remarks:v("fRemarks"),startDate:v("fStart"),price:v("fPrice")};const text=await apiPost("proposalText",p);await copyText(text);setMsg("modalMessage","紹介文をコピーしました。","success")}catch(e){setMsg("modalMessage",e.message,"error")}}
+async function copyText(text){
+  if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return}
+  const area=document.createElement("textarea");area.value=text;area.setAttribute("readonly","");area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();
+  const ok=document.execCommand("copy");area.remove();if(!ok)throw new Error("コピーできませんでした。文章を長押ししてコピーしてください。");
+}
+function updateSkillSheetButton(){const btn=$("openSkillSheetBtn");if(!btn)return;btn.hidden=!isSafeSkillSheetUrl(v("fSkillSheetUrl"))}
+function isSafeSkillSheetUrl(value){try{const url=new URL(String(value||"").trim());return url.protocol==="https:"&&(url.hostname==="drive.google.com"||url.hostname==="docs.google.com")}catch(_){return false}}
+function openSkillSheet(){const url=v("fSkillSheetUrl");if(!isSafeSkillSheetUrl(url)){setMsg("modalMessage","Google DriveまたはGoogleドキュメントのURLを入力してください。","error");return}window.open(url,"_blank","noopener,noreferrer")}
 function v(id){return $(id)?.value||""}
 function openModal(){$("modal").hidden=false;document.body.style.overflow="hidden";setMsg("modalMessage","")}
 function closeModal(){$("modal").hidden=true;document.body.style.overflow=""}
