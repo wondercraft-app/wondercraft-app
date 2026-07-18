@@ -11,7 +11,73 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./assets/icon-192.png">
   <link rel="apple-touch-icon" href="./assets/icon-192.png">
-  <link rel="stylesheet" href="./style.css?v=7.0.0-phase3">
+  <style>
+:root{--navy:#0A3478;--blue:#1769AA;--bg:#F4F7FB;--card:#fff;--text:#17202A;--muted:#6B7480;--border:#DFE6EE;--danger:#B42318;--soft:#EAF2FB}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}body{padding-bottom:82px}button,input,select,textarea{font:inherit}button{cursor:pointer}[hidden]{display:none!important}
+.splash{position:fixed;inset:0;z-index:9999;display:grid;place-content:center;justify-items:center;background:linear-gradient(145deg,#fff,#eaf1f9);transition:.4s}.splash.hide{opacity:0;visibility:hidden}.splash img{width:145px;border-radius:30px;box-shadow:0 16px 42px #0a34782a}.splash h1{font-family:Georgia,serif;color:#08275e;letter-spacing:.08em;margin:18px 0 5px}.splash p{color:#41618c;margin:0}
+.topbar{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;align-items:center;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;background:#fffffff2;border-bottom:1px solid var(--border);backdrop-filter:blur(15px)}.brand{display:flex;gap:10px;align-items:center}.brand img{width:46px;border-radius:12px}.brand small,.brand strong{display:block}.brand small{color:var(--navy);font-weight:800}.brand strong{font-size:21px}.icon-btn{width:43px;height:43px;border:1px solid var(--border);border-radius:12px;background:#fff;font-size:22px}
+main{max-width:860px;margin:auto;padding:14px}.setup-panel{max-width:560px;margin:30px auto;padding:22px;background:#fff;border:1px solid var(--border);border-radius:20px}.setup-panel p{color:var(--muted);line-height:1.7}
+input,select,textarea{width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:#fff;color:var(--text)}textarea{min-height:105px;resize:vertical}.primary,.secondary{min-height:46px;padding:10px 16px;border-radius:11px;font-weight:800}.primary{border:0;color:#fff;background:var(--navy)}.secondary{border:1px solid var(--border);background:#fff}.setup-panel .primary{width:100%;margin-top:16px}
+.home-dashboard{margin-bottom:14px}.dashboard{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}.dashboard article{padding:15px;border:1px solid var(--border);border-radius:16px;background:#fff}.dashboard span{display:block;color:var(--muted);font-size:13px}.dashboard strong{display:block;margin-top:7px;color:var(--navy);font-size:28px}
+.home-header{margin:4px 0 12px;padding:19px 18px;border-radius:20px;color:#fff;background:linear-gradient(135deg,#092c68,#1769aa);box-shadow:0 12px 30px #0a347826}.home-header h1{margin:2px 0 6px;font-size:25px}.home-header p{margin:0;opacity:.88;font-size:14px}.home-header .eyebrow{font-size:11px;font-weight:900;letter-spacing:.16em;opacity:.75}.list-header{margin:5px 0 10px}.list-header h1{margin:0;font-size:24px}.list-header p{margin:5px 0 0;color:var(--muted);font-size:14px}
+.filters{display:grid;gap:8px;margin-top:12px}.status{min-height:28px;padding:5px 2px;color:var(--muted);font-size:14px}.cards{display:grid;gap:10px}.card{padding:15px;border:1px solid var(--border);border-radius:17px;background:#fff;box-shadow:0 5px 16px #1e37550a}.card.clickable{cursor:pointer}.card h3{margin:0 0 10px;font-size:19px}.badge{display:inline-block;margin:0 5px 6px 0;padding:4px 8px;border-radius:999px;color:var(--navy);background:var(--soft);font-size:12px;font-weight:800}.details{display:grid;grid-template-columns:7em 1fr;gap:5px 8px;font-size:14px;line-height:1.55}.label{color:var(--muted)}.remarks{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.hint{margin-top:9px;color:var(--blue);font-size:13px;font-weight:800}
+.interview-card{display:grid;grid-template-columns:78px 1fr;gap:14px;padding:0;overflow:hidden}.interview-time{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:152px;padding:14px 8px;color:#fff;background:linear-gradient(160deg,#0a3478,#1769aa)}.interview-time strong{font-size:22px;letter-spacing:.02em}.interview-time span{margin-top:5px;font-size:11px;font-weight:800;opacity:.8}.interview-body{padding:15px 15px 15px 0}.interview-body h3{font-size:20px}.interview-details{grid-template-columns:6.5em 1fr;margin-top:4px}
+.loading,.empty,.error{padding:28px 14px;text-align:center;border:1px solid var(--border);border-radius:16px;background:#fff}.error{color:var(--danger)}.message{min-height:24px;margin-top:10px;font-size:14px}.message.error{color:var(--danger)}.message.success{color:#067647}
+.modal{position:fixed;inset:0;z-index:100}.backdrop{position:absolute;inset:0;background:#11182799}.modal-panel{position:absolute;left:0;right:0;bottom:0;max-height:93vh;overflow:auto;padding:16px;background:#fff;border-radius:20px 20px 0 0}.modal-panel>header{position:sticky;top:-16px;z-index:2;display:flex;justify-content:space-between;align-items:center;margin:-16px -16px 14px;padding:15px;background:#fff;border-bottom:1px solid var(--border)}.modal-panel header h2{margin:0}.modal-panel header button{width:40px;height:40px;border:1px solid var(--border);border-radius:11px;background:#fff;font-size:25px}.form-grid{display:grid;gap:11px}.form-grid label{display:grid;gap:5px;color:var(--muted);font-size:13px;font-weight:800}.modal-panel footer{position:sticky;bottom:-16px;display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:14px -16px -16px;padding:12px 16px calc(14px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--border)}.modal-panel footer #copyProposalBtn{grid-column:1/-1}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;grid-template-columns:repeat(3,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:#fffffff2;border-top:1px solid var(--border);backdrop-filter:blur(15px)}.bottom-nav button{display:grid;place-items:center;gap:1px;min-height:52px;border:0;border-radius:11px;color:var(--muted);background:transparent;font-size:11px;font-weight:800}.bottom-nav button.active{color:var(--navy);background:var(--soft)}.nav-icon{font-size:21px;line-height:1}
+@media(max-width:420px){.interview-card{grid-template-columns:68px 1fr}.interview-time strong{font-size:19px}.interview-body{padding-right:12px}.interview-details{grid-template-columns:6em 1fr;font-size:13px}}
+@media(min-width:680px){.dashboard{grid-template-columns:repeat(4,1fr)}.filters{grid-template-columns:2fr 1fr 1fr 1fr 1fr}.form-grid{grid-template-columns:1fr 1fr}.modal-panel{top:4vh;bottom:auto;width:min(760px,94vw);margin:auto;border-radius:20px}.full{grid-column:1/-1}}
+
+/* WC-6.2 バージョン表示 */
+.title-row{display:flex;align-items:baseline;gap:10px}
+.app-version{font-size:12px;font-weight:700;letter-spacing:.04em;color:#6b7280;white-space:nowrap}
+
+/* WC-6.3 */
+.check-group{margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:11px}.check-group legend{padding:0 4px;color:var(--muted);font-size:13px;font-weight:800}.check-group>div{display:flex;flex-wrap:wrap;gap:8px 14px}.check-group label{display:flex!important;grid-auto-flow:column;justify-content:start;align-items:center;gap:6px!important;color:var(--text)!important}.check-group input{width:20px;min-height:20px;margin:0}.modal-panel footer #openSkillSheetBtn{grid-column:1/-1}
+
+
+/* WC-6.4 認証 */
+.top-actions{display:flex;align-items:center;gap:7px}.current-user{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px;font-weight:800}.logout-btn{width:auto;min-width:48px;padding:0 9px;font-size:12px;font-weight:800}
+.login-panel{min-height:calc(100vh - 150px);display:grid;place-items:center;padding:12px}.login-card{width:min(430px,100%);padding:28px 22px;background:#fff;border:1px solid var(--border);border-radius:22px;box-shadow:0 14px 40px #16365d14}.login-card>img{display:block;width:76px;margin:0 auto 12px;border-radius:18px}.login-card h1{margin:2px 0 8px;text-align:center}.login-card>.eyebrow{text-align:center;color:var(--navy);font-size:11px;font-weight:900;letter-spacing:.15em}.login-help,.login-note{text-align:center;color:var(--muted);line-height:1.6}.login-card form{display:grid;gap:12px;margin-top:20px}.login-card label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:800}.login-card .primary{width:100%;margin-top:3px}.text-btn{display:block;margin:15px auto 0;border:0;background:transparent;color:var(--blue);font-weight:800}.login-note{margin:15px 0 0;font-size:12px}
+@media(max-width:520px){.current-user{display:none!important}}
+
+.partner-register-box{margin-top:12px;padding:14px;border:1px solid var(--line,#dfe5ec);border-radius:14px;background:#f8fafc}
+.partner-register-box h3{margin:0 0 12px}
+.partner-register-box label{display:block;margin:10px 0;font-weight:700}
+.partner-register-box input{width:100%;margin-top:6px}
+.partner-approval-panel{margin-bottom:16px}
+.partner-request-card{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px;border:1px solid var(--line,#dfe5ec);border-radius:14px;margin:10px 0;background:#fff}
+.partner-request-main small{display:block;margin-top:5px;opacity:.7}
+.partner-request-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:640px){.partner-request-card{align-items:stretch;flex-direction:column}.partner-request-actions button{flex:1}}
+
+.partner-register-box{margin-top:14px;padding:14px;border:1px solid var(--line,#dfe5ec);border-radius:14px;background:#f8fafc}
+.partner-register-box h3{margin:0 0 10px}
+.partner-register-box label{display:block;margin:10px 0;font-weight:700}
+.partner-register-box input{width:100%;margin-top:6px}
+.approval-area{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+.approval-panel{background:#fff;border:1px solid var(--line,#dfe5ec);border-radius:18px;padding:16px}
+.approval-head{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.approval-head h2{margin:2px 0 0;font-size:19px}
+.partner-request-card{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:13px;border:1px solid var(--line,#dfe5ec);border-radius:14px;margin-top:10px}
+.partner-request-main small{display:block;margin-top:5px;opacity:.65}
+.partner-request-actions,.partner-card-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.partner-portal{padding-bottom:20px}
+.partner-hero{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.partner-hero h1{margin:2px 0 4px}
+.partner-search{margin-bottom:12px}
+.partner-search input{width:100%}
+.partner-tabs{display:flex;gap:8px;margin:12px 0}
+.partner-tabs button{flex:1;border-radius:12px;padding:11px;border:1px solid var(--line,#dfe5ec);background:#fff;font-weight:800}
+.partner-tabs button.active{background:#0A3478;color:#fff}
+.partner-candidate-card .card-head{display:flex;justify-content:space-between;align-items:flex-start}
+.partner-candidate-card h3{margin:0 0 6px}
+.link-button{display:inline-flex;text-decoration:none;align-items:center;justify-content:center}
+body[data-role="partner"] .topbar .brand strong{font-size:0}
+body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";font-size:16px}
+@media(max-width:800px){.approval-area{grid-template-columns:1fr}.partner-hero{align-items:flex-start;flex-direction:column}.partner-request-card{align-items:stretch;flex-direction:column}.partner-request-actions button{flex:1}}
+
+</style>
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -25,7 +91,7 @@
       <img src="./assets/icon-192.png" alt="WC">
       <div>
         <small>WonderCraft</small>
-        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-7.0.0 Phase3</span></div>
+        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-7.0.0 Phase3 Fix1</span></div>
       </div>
     </div>
     <div class="top-actions"><span id="currentUserName" class="current-user" hidden></span><button id="logoutBtn" class="icon-btn logout-btn" type="button" aria-label="ログアウト" title="ログアウト" hidden>退出</button><button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button></div>
