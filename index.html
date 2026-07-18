@@ -11,7 +11,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./assets/icon-192.png">
   <link rel="apple-touch-icon" href="./assets/icon-192.png">
-  <link rel="stylesheet" href="./style.css?v=6.3.2">
+  <link rel="stylesheet" href="./style.css?v=7.0.0-phase3">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -25,13 +25,42 @@
       <img src="./assets/icon-192.png" alt="WC">
       <div>
         <small>WonderCraft</small>
-        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-6.3.2</span></div>
+        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-7.0.0 Phase3</span></div>
       </div>
     </div>
-    <button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button>
+    <div class="top-actions"><span id="currentUserName" class="current-user" hidden></span><button id="logoutBtn" class="icon-btn logout-btn" type="button" aria-label="ログアウト" title="ログアウト" hidden>退出</button><button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button></div>
   </header>
 
   <main>
+
+    <section id="loginPanel" class="login-panel" hidden>
+      <div class="login-card">
+        <img src="./assets/icon-192.png" alt="WonderCraft">
+        <p class="eyebrow">WONDERCRAFT</p>
+        <h1>ログイン</h1>
+        <p class="login-help">登録済みのメールアドレスとパスワードを入力してください。</p>
+        <form id="loginForm">
+          <label>メールアドレス<input id="loginEmail" type="email" inputmode="email" autocomplete="username" required></label>
+          <label>パスワード<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+          <div id="loginMessage" class="message" aria-live="polite"></div>
+          <button id="loginBtn" class="primary" type="submit">ログイン</button>
+        </form>
+        
+        <button id="showPartnerRegisterBtn" class="text-btn" type="button">他企業の新規登録はこちら</button>
+        <div id="partnerRegisterBox" class="partner-register-box" hidden>
+          <h3>他企業 新規登録申請</h3>
+          <label>会社名<input id="regCompany" autocomplete="organization"></label>
+          <label>担当者名<input id="regPerson" autocomplete="name"></label>
+          <label>メールアドレス<input id="regEmail" type="email" autocomplete="email"></label>
+          <label>パスワード<input id="regPassword" type="password" minlength="8" autocomplete="new-password"></label>
+          <button id="partnerRegisterBtn" class="primary" type="button">登録申請する</button>
+          <div id="partnerRegisterMessage" class="message" aria-live="polite"></div>
+        </div>
+
+        <button id="forgotPasswordBtn" class="text-btn" type="button">パスワードを忘れた方</button>
+        <p class="login-note">初回ログイン後は、この端末で自動ログインします。</p>
+      </div>
+    </section>
     <section id="systemPanel" class="setup-panel" aria-live="polite">
       <h2 id="systemTitle">接続確認中</h2>
       <p id="systemMessage">システムへ接続しています。</p>
@@ -39,6 +68,39 @@
     </section>
 
     <section id="appPanel" hidden>
+      
+      <section id="internalApprovalArea" class="approval-area" hidden>
+        <section class="approval-panel">
+          <div class="approval-head"><div><p class="eyebrow">APPROVAL</p><h2>他企業 登録申請</h2></div><button id="reloadPartnerRequestsBtn" class="secondary" type="button">更新</button></div>
+          <div id="partnerRequestsList"></div>
+        </section>
+        <section class="approval-panel">
+          <div class="approval-head"><div><p class="eyebrow">SKILL SHEET</p><h2>スキルシート申請</h2></div><button id="reloadSkillRequestsBtn" class="secondary" type="button">更新</button></div>
+          <div id="skillRequestsList"></div>
+        </section>
+      </section>
+
+      
+      <section id="partnerPortal" class="partner-portal" hidden>
+        <section class="partner-hero">
+          <div><p class="eyebrow">PARTNER PORTAL</p><h1>人材を探す</h1><p>候補者を確認し、必要なスキルシートを申請できます。</p></div>
+          <button id="reloadPartnerPortalBtn" class="secondary" type="button">更新</button>
+        </section>
+        <section class="partner-search"><input id="partnerSearchInput" type="search" placeholder="名前・地域・駅・経験で検索"></section>
+        <section>
+          <div class="partner-tabs">
+            <button id="partnerCandidatesTab" class="active" type="button">求職者</button>
+            <button id="partnerRequestsTab" type="button">申請履歴</button>
+          </div>
+          <div id="partnerCandidatesView">
+            <div id="partnerCandidatesList" class="cards"></div>
+          </div>
+          <div id="partnerRequestsView" hidden>
+            <div id="mySkillRequestsList" class="cards"></div>
+          </div>
+        </section>
+      </section>
+
       <section id="dashboardSection" class="home-dashboard" aria-label="全体件数">
         <div class="dashboard">
           <article><span>求職者</span><strong id="countCandidates">-</strong></article>
@@ -70,12 +132,12 @@
           <option value="">地域：すべて</option>
         </select>
         <select id="experienceFilter" aria-label="経験区分で絞り込み">
-          <option value="">経験区分：指定なし</option>
+          <option value="">経験区分：すべて</option>
           <option value="experienced">経験者</option>
           <option value="inexperienced">未経験者</option>
         </select>
         <select id="careerFilter" aria-label="経験キャリアで絞り込み">
-          <option value="">経験キャリア：指定なし</option>
+          <option value="">経験キャリア：すべて</option>
           <option value="docomo">ドコモ</option>
           <option value="sb">SB</option>
           <option value="au">au</option>
@@ -120,7 +182,7 @@
     </button>
   </nav>
 
-  <script src="./config.js?v=6.3.2"></script>
-  <script src="./app.js?v=6.3.2"></script>
+  <script src="./config.js?v=7.0.0-phase3"></script>
+  <script src="./app.js?v=7.0.0-phase3"></script>
 </body>
 </html>
