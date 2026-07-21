@@ -1,5 +1,5 @@
-/* WonderCraft PWA WC-6.3.2 - 求職者経験検索・スキルシートURL対応 */
-const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{}};
+/* WonderCraft PWA WC-7.0.0 Phase3 - 認証・権限基盤 */
+const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
@@ -9,12 +9,15 @@ window.addEventListener("load",()=>{
   setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$('splash')?.remove(),450)},900);
   if("serviceWorker"in navigator)navigator.serviceWorker.register("./service-worker.js").catch(console.error);
   bindEvents();
-  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-6.2";
+  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-7.0.0 Phase3";
   initialize();
 });
 
 function bindEvents(){
   $("systemRetryBtn").onclick=()=>initialize(true);
+  $("loginForm").onsubmit=handleLogin;
+  $("logoutBtn").onclick=logout;
+  $("forgotPasswordBtn").onclick=()=>showLoginMessage("パスワード再発行申請は次の段階で追加します。現在は自社担当者へご連絡ください。",false);
   $("reloadBtn").onclick=()=>initialize(true);
   $("searchInput").addEventListener("input",()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(loadCurrent,350)});
   $("staffFilter").onchange=loadCurrent;
@@ -26,96 +29,131 @@ function bindEvents(){
   $("editForm").onsubmit=saveEdit;
   $("copyProposalBtn").onclick=copyProposal;
   $("openSkillSheetBtn").onclick=openSkillSheet;
+  $("showPartnerRegisterBtn")?.addEventListener("click",()=>{const box=$("partnerRegisterBox");if(box)box.hidden=!box.hidden;});
+  $("partnerRegisterBtn")?.addEventListener("click",submitPartnerRegistration);
+  $("reloadPartnerRequestsBtn")?.addEventListener("click",loadPartnerRequests);
+  $("reloadSkillRequestsBtn")?.addEventListener("click",loadSkillSheetRequests);
+  $("reloadPartnerPortalBtn")?.addEventListener("click",reloadPartnerPortal);
+  $("partnerCandidatesTab")?.addEventListener("click",()=>showPartnerTab("candidates"));
+  $("partnerRequestsTab")?.addEventListener("click",()=>showPartnerTab("requests"));
+  $("partnerSearchInput")?.addEventListener("input",()=>{clearTimeout(partnerSearchTimer);partnerSearchTimer=setTimeout(reloadPartnerPortal,350);});
 }
 
 async function initialize(force=false){
   try{
+    hideLogin();
     if($("appPanel").hidden){
       $("systemPanel").hidden=false;
       $("systemTitle").textContent="接続確認中";
       $("systemMessage").textContent="システムへ接続しています。";
       $("systemRetryBtn").hidden=true;
-    }else{
-      hideSystemPanel();
     }
     const api=getApi();
-    if(!api||api.includes("ここにGAS")){
-      return showSystemError("管理者設定エラー","GASウェブアプリURLが設定されていません。管理者へ連絡してください。");
-    }
+    if(!api||api.includes("ここにGAS"))return showMaintenance("現在システムメンテナンス中です。しばらくしてから再度お試しください。");
 
-    ensureDeviceId();
-    let token=getToken();
-
-    if(!token){
-      const oldPin=localStorage.getItem("wc_pin")||"";
-      try{
-        const enrolled=await enrollDevice(oldPin);
-        token=enrolled.token;
-        localStorage.removeItem("wc_pin");
-      }catch(error){
-        return showEnrollmentError(error);
-      }
-    }
+    const token=getToken();
+    if(!token)return showLogin();
 
     const bootstrap=await apiGet("bootstrap",{},api,token);
+    state.user=bootstrap.user||null;
+    applyRoleUi();
+    if(state.user && ["admin","staff"].includes(state.user.role)){
+      setTimeout(()=>{loadPartnerRequests();loadSkillSheetRequests();},0);
+    }
     state.runtimeConfig=bootstrap.config||{};
-    if(state.runtimeConfig.maintenance){
-      return showMaintenance(state.runtimeConfig.maintenanceMessage||"現在メンテナンス中です。");
+    if(state.runtimeConfig.maintenance)return showMaintenance(state.runtimeConfig.maintenanceMessage||"現在メンテナンス中です。");
+    if(state.user?.role==="partner"){
+      updateUserUi();
+      $("appPanel").hidden=false;
+      hideSystemPanel();
+      showPartnerPortal(bootstrap);
+      return;
     }
 
+    updateUserUi();
     const filters=bootstrap.filters||{};
     state.progressStatuses=filters.progressStatuses||[];
     fillSelect("staffFilter",filters.staff||[],"担当者：全員");
     fillSelect("regionFilter",filters.regions||[],"地域：すべて");
     renderDashboard(bootstrap.dashboard||{});
     state.today=bootstrap.today||[];
-
     $("appPanel").hidden=false;
     hideSystemPanel();
     if(force)setStatus("最新情報を読み込みました。");
-
     applyViewState();
-    if(state.view==="home")renderToday(state.today);
-    else await loadCurrent();
+    if(state.view==="home")renderToday(state.today);else await loadCurrent();
   }catch(error){
-    if(isDeviceAuthError(error)){
-      clearToken();
-      try{
-        await enrollDevice("");
-        return initialize(force);
-      }catch(enrollError){
-        return showEnrollmentError(enrollError);
-      }
-    }
-    showSystemError("接続エラー",error.message||"システムへ接続できませんでした。");
+    if(isAuthError(error)){clearToken();state.user=null;updateUserUi();return showLogin("ログインの有効期限が切れました。もう一度ログインしてください。");}
+    showMaintenance("現在システムメンテナンス中です。しばらくしてから再度お試しください。");
   }
 }
 
-function getApi(){return String(config.GAS_API_URL||"").trim().replace(/\/+$/,"")}
-function ensureDeviceId(){let id=localStorage.getItem("wc_device_id");if(!id){id=(crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`);localStorage.setItem("wc_device_id",id)}return id}
-function getDeviceName(){const platform=navigator.userAgentData?.platform||navigator.platform||"端末";const mobile=/iPhone|iPad|Android|Mobile/i.test(navigator.userAgent)?"スマホ":"PC";return `${mobile} / ${platform}`.slice(0,100)}
-function getToken(){return localStorage.getItem("wc_device_token")||""}
-function saveToken(token){localStorage.setItem("wc_device_token",token)}
-function clearToken(){localStorage.removeItem("wc_device_token")}
+async function handleLogin(event){
+  event.preventDefault();
+  const email=$("loginEmail").value.trim();
+  const password=$("loginPassword").value;
+  if(!email||!password)return showLoginMessage("メールアドレスとパスワードを入力してください。",true);
+  const button=$("loginBtn");button.disabled=true;button.textContent="ログイン中...";showLoginMessage("",false);
+  try{
+    const data=await publicPost("login",{email,password,deviceName:getDeviceName()});
+    saveToken(data.token);state.user=data.user||null;$("loginPassword").value="";await initialize(true);
+  }catch(error){showLoginMessage(error.message||"ログインできませんでした。",true)}finally{button.disabled=false;button.textContent="ログイン"}
+}
 
-async function enrollDevice(pin=""){
-  const url=new URL(getApi());
-  url.searchParams.set("api","1");
-  url.searchParams.set("action","enroll");
-  url.searchParams.set("deviceId",ensureDeviceId());
-  url.searchParams.set("deviceName",getDeviceName());
-  if(pin)url.searchParams.set("pin",pin);
-  const response=await fetch(url.toString(),{redirect:"follow",cache:"no-store"});
-  const json=await response.json();
-  if(!json.success){const error=new Error(json.error||"端末登録に失敗しました。");error.code=json.code||"ENROLL_ERROR";throw error}
-  saveToken(json.data.token);state.runtimeConfig=json.data.config||{};return json.data;
+async function logout(){
+  try{if(getToken())await apiPost("logout",{})}catch(_e){}
+  clearToken();state.user=null;updateUserUi();$("appPanel").hidden=true;showLogin("ログアウトしました。");
+}
+function showLogin(message=""){$("systemPanel").hidden=true;$("appPanel").hidden=true;$("loginPanel").hidden=false;$("logoutBtn").hidden=true;$("currentUserName").hidden=true;if(message)showLoginMessage(message,false);setTimeout(()=>$("loginEmail")?.focus(),50)}
+function hideLogin(){$("loginPanel").hidden=true}
+function showLoginMessage(message,isError){const el=$("loginMessage");el.textContent=message||"";el.className=`message${message?(isError?" error":" success"):""}`}
+
+function applyRoleUi(){
+  const role=state.user?.role||"";
+  document.body.dataset.role=role;
+  const internal=["admin","staff"].includes(role);
+  if($("internalApprovalArea")) $("internalApprovalArea").hidden=!internal;
+  document.querySelector(".bottom-nav")?.toggleAttribute("hidden", role==="partner");
+  if($("partnerPortal")) $("partnerPortal").hidden=role!=="partner";
+  if(role==="partner"){
+    ["dashboardSection","homeHeader","listHeader","filterSection","cards","status"].forEach(id=>{const el=$(id);if(el)el.hidden=true;});
+  }
+  // admin / staff は既存の社内画面を利用。partner は専用ポータルへ分岐。
+  if(role==="admin"){
+    document.title="WonderCraft 管理";
+  }else if(role==="staff"){
+    document.title="WonderCraft";
+  }else if(role==="partner"){
+    document.title="WonderCraft Partner Portal";
+  }
+}
+
+function updateUserUi(){const logged=!!state.user;$("logoutBtn").hidden=!logged;$("currentUserName").hidden=!logged;$("currentUserName").textContent=logged?`${state.user.name||state.user.email}（${roleLabel(state.user.role)}）`:""}
+function roleLabel(role){return role==="admin"?"管理者":role==="staff"?"自社社員":"他企業"}
+function isAuthError(error){return ["AUTH_REQUIRED","SESSION_INVALID","SESSION_EXPIRED","USER_DISABLED","ROLE_DENIED"].includes(error.code)}
+
+function getApi(){return String(config.GAS_API_URL||"").trim().replace(/\/+$/,"")}
+function getDeviceName(){const platform=navigator.userAgentData?.platform||navigator.platform||"端末";const mobile=/iPhone|iPad|Android|Mobile/i.test(navigator.userAgent)?"スマホ":"PC";return `${mobile} / ${platform}`.slice(0,100)}
+function getToken(){return localStorage.getItem("wc_session_token")||""}
+function saveToken(token){localStorage.setItem("wc_session_token",token)}
+function clearToken(){localStorage.removeItem("wc_session_token")}
+
+async function publicPost(action,payload){
+  const response=await fetch(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,payload})});
+  const json=await response.json();if(!json.success){const error=new Error(json.error||"処理に失敗しました。");error.code=json.code||"API_ERROR";throw error}return json.data;
 }
 
 function hideSystemPanel(){if($("systemPanel"))$("systemPanel").hidden=true}
-function showSystemError(title,message){$("appPanel").hidden=true;$("systemPanel").hidden=false;$("systemTitle").textContent=title||"エラー";$("systemMessage").textContent=message||"システムへ接続できませんでした。";$("systemRetryBtn").hidden=false}
-function showEnrollmentError(error){const code=error&&error.code?error.code:"";let message=error&&error.message?error.message:"端末の自動登録に失敗しました。";if(code==="ENROLL_ERROR"||message.includes("PIN"))message="端末の自動登録が許可されていません。管理者に PWA_AUTO_ENROLL の設定確認を依頼してください。";showSystemError("端末登録エラー",message)}
-function showMaintenance(message){$("appPanel").hidden=true;$("systemPanel").hidden=false;$("systemTitle").textContent="メンテナンス中";$("systemMessage").textContent=message||"現在メンテナンス中です。";$("systemRetryBtn").hidden=true}
-function isDeviceAuthError(error){return ["DEVICE_ENROLL_REQUIRED","DEVICE_TOKEN_INVALID","DEVICE_TOKEN_EXPIRED","DEVICE_DISABLED"].includes(error.code)}
+function showSystemError(title,message){hideLogin();$("appPanel").hidden=true;$("systemPanel").hidden=false;$("systemTitle").textContent=title||"エラー";$("systemMessage").textContent=message||"システムへ接続できませんでした。";$("systemRetryBtn").hidden=false}
+function normalizeUserFacingError(err){
+  const code=String(err?.code||"");
+  if(["SESSION_INVALID","SESSION_EXPIRED","AUTH_REQUIRED","API_ERROR"].includes(code)){
+    return "現在システムメンテナンス中です。";
+  }
+  return err?.message||"エラーが発生しました。";
+}
+
+function showMaintenance(message){hideLogin();$("appPanel").hidden=true;$("systemPanel").hidden=false;$("systemTitle").textContent="メンテナンス中";$("systemMessage").textContent=message||"現在メンテナンス中です。";$("systemRetryBtn").hidden=true}
 
 async function apiGet(action,params={},api=getApi(),token=getToken()){
   const url=new URL(api);url.searchParams.set("api","1");url.searchParams.set("action",action);url.searchParams.set("token",token);
@@ -276,7 +314,7 @@ function buildCandidateForm(x){
     field("fCompany","提案元会社",x.company)+field("fPrice","希望単価",x.price)+
     careerChecks(x.career)+
     field("fExp","経験値",x.experience,"text",["","通信経験者","通信未経験","通信微経験","コール経験者","コール未経験"])+
-    field("fStart","開始希望",x.startDate)+field("fProg","進捗",x.progress)+
+    field("fStart","開始希望",x.startDate)+field("fProg","進捗",x.progress,"text",progressStatusOptions(x.progress))+
     field("fMove","移動型可否",x.moveType,"text",["","○","×","距離次第"])+
     field("fSkillSheetUrl","スキルシートURL",x.skillSheetUrl||"","url",null,true)+
     field("fRemarks","備考",x.remarks,"textarea",null,true);
@@ -284,7 +322,7 @@ function buildCandidateForm(x){
 }
 
 function progressStatusOptions(current){
-  const values=["",...(state.progressStatuses||[])];
+  const values=["","案件待ち","案件提案中","面談待ち","合否待ち","完了","取り下げ","他社面談予定"];
   if(current&&!values.includes(current))values.push(current);
   return [...new Set(values)];
 }
@@ -307,7 +345,10 @@ async function saveEdit(e){
       const x=state.selected.item;
       await apiPost("updateProgress",{rowNumber:x.rowNumber,originalName:x.name,entryMonth:v("fEntry"),staff:v("fStaff"),company:v("fCompany"),name:v("fName"),projectStaff:v("fProjectStaff"),upperCompany:v("fUpper"),status:v("fStatus"),area:v("fArea"),remarks:v("fRemarks")});
     }
-    setMsg("modalMessage","更新しました。","success");setTimeout(()=>{closeModal();loadDashboard();loadCurrent()},500);
+    // 保存成功後は編集画面に留まらず、すぐ元の一覧へ戻して最新データを再読込する。
+    closeModal();
+    await Promise.allSettled([loadDashboard(), loadCurrent()]);
+    setStatus("保存しました。");
   }catch(err){setMsg("modalMessage",err.message,"error")}
 }
 
@@ -329,3 +370,198 @@ function showError(e){$("cards").innerHTML=`<div class="error">${esc(e.message||
 function setStatus(t){$("status").textContent=t||""}
 function setMsg(id,t,type=""){$(id).textContent=t||"";$(id).className="message"+(type?" "+type:"")}
 function esc(x){return String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+
+async function submitPartnerRegistration(){
+  const company=document.getElementById("regCompany")?.value.trim()||"";
+  const person=document.getElementById("regPerson")?.value.trim()||"";
+  const email=document.getElementById("regEmail")?.value.trim()||"";
+  const password=document.getElementById("regPassword")?.value||"";
+  const box=document.getElementById("partnerRegisterMessage");
+  if(box) box.textContent="";
+  try{
+    const res=await publicPost("partnerRegister",{company,person,email,password});
+    if(box){box.textContent=res?.message||"登録申請を受け付けました。";box.className="auth-message success";}
+    ["regCompany","regPerson","regEmail","regPassword"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+  }catch(err){
+    if(box){box.textContent=err?.message||"申請に失敗しました。";box.className="auth-message error";}
+  }
+}
+
+async function loadPartnerRequests(){
+  if(!state.user || !["admin","staff"].includes(state.user.role)) return;
+  const panel=document.getElementById("partnerApprovalPanel");
+  const list=document.getElementById("partnerRequestsList");
+  if(panel) panel.hidden=false;
+  if(!list) return;
+  list.innerHTML='<div class="empty">読み込み中...</div>';
+  try{
+    const rows=await apiPost("partnerRequests",{});
+    if(!Array.isArray(rows)||!rows.length){list.innerHTML='<div class="empty">登録申請はありません。</div>';return;}
+    list.innerHTML=rows.map(r=>`
+      <div class="partner-request-card">
+        <div class="partner-request-main">
+          <strong>${escapeHtml(r.company||"")}</strong>
+          <div>${escapeHtml(r.person||"")} / ${escapeHtml(r.email||"")}</div>
+          <small>${escapeHtml(r.status||"")} ${escapeHtml(r.requestedAt||"")}</small>
+        </div>
+        ${r.status==="申請中"?`
+        <div class="partner-request-actions">
+          <button class="btn primary" onclick="approvePartnerRequest('${r.requestId}')">承認</button>
+          <button class="btn danger" onclick="rejectPartnerRequest('${r.requestId}')">却下</button>
+        </div>`:""}
+      </div>`).join("");
+  }catch(err){
+    list.innerHTML='<div class="empty">申請一覧を取得できませんでした。</div>';
+  }
+}
+
+async function approvePartnerRequest(requestId){
+  if(!confirm("この企業アカウントを承認しますか？")) return;
+  try{
+    await apiPost("approvePartner",{requestId});
+    await loadPartnerRequests();
+    showToast("承認しました。");
+  }catch(err){showToast(err?.message||"承認に失敗しました。","error");}
+}
+
+async function rejectPartnerRequest(requestId){
+  const reason=prompt("却下理由（任意）","")??null;
+  if(reason===null) return;
+  try{
+    await apiPost("rejectPartner",{requestId,reason});
+    await loadPartnerRequests();
+    showToast("却下しました。");
+  }catch(err){showToast(err?.message||"却下に失敗しました。","error");}
+}
+
+document.addEventListener("DOMContentLoaded",()=>{
+  const showBtn=document.getElementById("showPartnerRegisterBtn");
+  const box=document.getElementById("partnerRegisterBox");
+  if(showBtn&&box) showBtn.addEventListener("click",()=>{box.hidden=!box.hidden;});
+  document.getElementById("partnerRegisterBtn")?.addEventListener("click",submitPartnerRegistration);
+  document.getElementById("reloadPartnerRequestsBtn")?.addEventListener("click",loadPartnerRequests);
+});
+
+
+let partnerSearchTimer=null;
+
+function showPartnerPortal(bootstrap){
+  const portal=$("partnerPortal");
+  if(portal) portal.hidden=false;
+  state.partnerCandidates=bootstrap?.partnerCandidates||[];
+  state.mySkillRequests=bootstrap?.mySkillRequests||[];
+  renderPartnerCandidates(state.partnerCandidates);
+  renderMySkillRequests(state.mySkillRequests);
+}
+
+async function reloadPartnerPortal(){
+  try{
+    const [candidates,requests]=await Promise.all([
+      apiGet("partnerCandidates",{q:$("partnerSearchInput")?.value||""}),
+      apiGet("mySkillRequests")
+    ]);
+    state.partnerCandidates=candidates||[];
+    state.mySkillRequests=requests||[];
+    renderPartnerCandidates(state.partnerCandidates);
+    renderMySkillRequests(state.mySkillRequests);
+  }catch(err){showToast(err?.message||"読み込みに失敗しました。","error");}
+}
+
+function skillRequestStatusFor(candidateKey){
+  const list=state.mySkillRequests||[];
+  return list.find(x=>x.candidateKey===candidateKey && ["申請中","承認済み"].includes(x.status))||null;
+}
+
+function renderPartnerCandidates(items){
+  const box=$("partnerCandidatesList"); if(!box)return;
+  if(!Array.isArray(items)||!items.length){box.innerHTML='<div class="empty">該当する求職者はいません。</div>';return;}
+  box.innerHTML=items.map((x,i)=>{
+    const req=skillRequestStatusFor(x.candidateKey);
+    let action='';
+    if(req?.status==="承認済み" && req.skillSheetUrl){
+      action=`<button class="primary" onclick="openApprovedSkillSheet('${esc(req.requestId)}','${esc(req.skillSheetUrl)}')">スキルシートを見る</button>`;
+    }else if(req?.status==="申請中"){
+      action=`<button class="secondary" disabled>申請中</button>`;
+    }else{
+      action=`<button class="primary" onclick="requestCandidateSkillSheet(${i})">スキルシートを申請</button>`;
+    }
+    return `<article class="card partner-candidate-card">
+      <div class="card-head"><div><h3>${esc(x.name||"名前未入力")}</h3><span class="badge">${esc(x.region||"")}</span></div></div>
+      <div class="details">${rows([
+        ["都道府県",x.prefecture],["最寄駅",x.station],["経験",x.experience],
+        ["経験キャリア",x.career],["開始希望",x.startDate]
+      ])}</div>
+      <div class="partner-card-actions">${action}</div>
+    </article>`;
+  }).join("");
+}
+
+async function requestCandidateSkillSheet(index){
+  const x=(state.partnerCandidates||[])[index]; if(!x)return;
+  if(!confirm(`${x.name}さんのスキルシートを申請しますか？`))return;
+  try{
+    const res=await apiPost("requestSkillSheet",{sheetName:x.sheetName,rowNumber:x.rowNumber});
+    showToast(res?.message||"申請しました。");
+    await reloadPartnerPortal();
+  }catch(err){showToast(err?.message||"申請に失敗しました。","error");}
+}
+
+function renderMySkillRequests(items){
+  const box=$("mySkillRequestsList"); if(!box)return;
+  if(!Array.isArray(items)||!items.length){box.innerHTML='<div class="empty">申請履歴はありません。</div>';return;}
+  box.innerHTML=items.map(x=>{
+    const open=x.status==="承認済み"&&x.skillSheetUrl
+      ? `<button class="primary" onclick="openApprovedSkillSheet('${esc(x.requestId)}','${esc(x.skillSheetUrl)}')">スキルシートを見る</button>`:"";
+    return `<article class="card">
+      <h3>${esc(x.candidateName||"")}</h3>
+      <div class="details">${rows([["状態",x.status],["申請日時",x.requestedAt],["承認日時",x.approvedAt],["却下理由",x.rejectReason]])}</div>
+      <div class="partner-card-actions">${open}</div>
+    </article>`;
+  }).join("");
+}
+
+async function openApprovedSkillSheet(requestId,url){
+  if(!url)return;
+  try{await apiPost("markSkillSheetViewed",{requestId});}catch(_e){}
+  window.open(url,"_blank","noopener");
+}
+
+function showPartnerTab(tab){
+  const candidates=tab==="candidates";
+  $("partnerCandidatesView").hidden=!candidates;
+  $("partnerRequestsView").hidden=candidates;
+  $("partnerCandidatesTab").classList.toggle("active",candidates);
+  $("partnerRequestsTab").classList.toggle("active",!candidates);
+}
+
+async function loadSkillSheetRequests(){
+  if(!state.user||!["admin","staff"].includes(state.user.role))return;
+  const list=$("skillRequestsList"); if(!list)return;
+  list.innerHTML='<div class="empty">読み込み中...</div>';
+  try{
+    const rows=await apiPost("skillSheetRequests",{});
+    if(!Array.isArray(rows)||!rows.length){list.innerHTML='<div class="empty">スキルシート申請はありません。</div>';return;}
+    list.innerHTML=rows.map(r=>`<div class="partner-request-card">
+      <div class="partner-request-main">
+        <strong>${esc(r.candidateName||"")}</strong>
+        <div>${esc(r.company||"")} / ${esc(r.person||"")} / ${esc(r.email||"")}</div>
+        <small>${esc(r.status||"")} ${esc(r.requestedAt||"")}</small>
+      </div>
+      ${r.status==="申請中"?`<div class="partner-request-actions">
+        <button class="primary" onclick="approveSkillRequest('${esc(r.requestId)}')">承認</button>
+        <button class="secondary" onclick="rejectSkillRequest('${esc(r.requestId)}')">却下</button>
+      </div>`:(r.status==="承認済み"&&r.skillSheetUrl?`<a class="secondary link-button" href="${esc(r.skillSheetUrl)}" target="_blank" rel="noopener">確認</a>`:"")}
+    </div>`).join("");
+  }catch(err){list.innerHTML='<div class="empty">申請一覧を取得できませんでした。</div>';}
+}
+
+async function approveSkillRequest(requestId){
+  if(!confirm("このスキルシート申請を承認しますか？"))return;
+  try{await apiPost("approveSkillSheetRequest",{requestId});showToast("承認しました。");await loadSkillSheetRequests();}
+  catch(err){showToast(err?.message||"承認に失敗しました。","error");}
+}
+async function rejectSkillRequest(requestId){
+  const reason=prompt("却下理由（任意）",""); if(reason===null)return;
+  try{await apiPost("rejectSkillSheetRequest",{requestId,reason});showToast("却下しました。");await loadSkillSheetRequests();}
+  catch(err){showToast(err?.message||"却下に失敗しました。","error");}
+}
