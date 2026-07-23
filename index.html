@@ -155,16 +155,6 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   to{transform:rotate(360deg)}
 }
 
-
-/* Production UI: keep internal build/version data, hide developer build label from users */
-.app-version,
-.version,
-.build-version,
-[data-version],
-[data-build-version] {
-  display: none !important;
-}
-
 </style>
 </head>
 <body>
@@ -179,7 +169,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img src="./assets/icon-192.png" alt="WC">
       <div>
         <small>WonderCraft</small>
-        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version" data-build-version="WC-7.28 Production UI"></span></div>
+        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-7.28</span></div>
       </div>
     </div>
     <div class="top-actions"><span id="currentUserName" class="current-user" hidden></span><button id="logoutBtn" class="icon-btn logout-btn" type="button" aria-label="ログアウト" title="ログアウト" hidden>退出</button><button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button></div>
@@ -365,8 +355,8 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     </button>
   </nav>
 
-  <script src="./config.js?v=7.28.0-production"></script>
-  <script src="./app.js?v=7.28.0-production"></script>
+  <script src="./config.js?v=7.28.1"></script>
+  <script src="./app.js?v=7.28.1"></script>
 
   <div id="wcLoadingOverlay" class="wc-loading-overlay" aria-live="polite" aria-busy="true">
     <div class="wc-loading-box">

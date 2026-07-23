@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-7-28-production";
+const CACHE="wondercraft-wc-7-28-1";
 const FILES=[
   "./",
   "./index.html",
   "./style.css?v=7.23.0",
-  "./config.js?v=7.28.0-production",
-  "./app.js?v=7.28.0-production",
+  "./config.js?v=7.28.1",
+  "./app.js?v=7.28.1",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png",
