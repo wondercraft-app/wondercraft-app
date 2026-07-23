@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-6-4-0";
+const CACHE="wondercraft-wc-7-27-performance";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=6.4.0",
-  "./config.js?v=6.4.0",
-  "./app.js?v=6.4.0",
+  "./style.css?v=7.23.0",
+  "./config.js?v=7.27.0-performance",
+  "./app.js?v=7.27.0-performance",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png",
@@ -23,9 +23,25 @@ self.addEventListener("activate",event=>{
 });
 
 self.addEventListener("fetch",event=>{
-  if(event.request.method!=="GET")return;
+  if(event.request.method!=="GET") return;
+
+  const isNavigation = event.request.mode === "navigate";
+
+  if(isNavigation){
+    event.respondWith(
+      fetch(event.request,{cache:"no-store"})
+        .then(response=>{
+          const copy=response.clone();
+          caches.open(CACHE).then(cache=>cache.put("./index.html",copy));
+          return response;
+        })
+        .catch(()=>caches.match("./index.html").then(cached=>cached||caches.match("./offline.html")))
+    );
+    return;
+  }
+
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request,{cache:"no-store"})
       .then(response=>{
         const copy=response.clone();
         caches.open(CACHE).then(cache=>cache.put(event.request,copy));
@@ -33,4 +49,11 @@ self.addEventListener("fetch",event=>{
       })
       .catch(()=>caches.match(event.request).then(cached=>cached||caches.match("./offline.html")))
   );
+});
+
+
+self.addEventListener("message", event => {
+  if(event.data && event.data.type === "SKIP_WAITING"){
+    self.skipWaiting();
+  }
 });

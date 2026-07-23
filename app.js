@@ -1,24 +1,185 @@
-/* WonderCraft PWA WC-7.0.0 Phase3 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.27 Performance - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
 let loadRequestId=0;
 
-window.addEventListener("load",()=>{
+window.addEventListener("load",async()=>{
+  wcLoadingDepth = 1;
+  wcLoadingShownAt = Date.now();
   setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$('splash')?.remove(),450)},900);
-  if("serviceWorker"in navigator)navigator.serviceWorker.register("./service-worker.js").catch(console.error);
+  registerWonderCraftServiceWorker_();
   bindEvents();
-  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-7.0.0 Phase3";
-  initialize();
+  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-7.27 Performance";
+  updateWcLoadingText_("読み込み中…");
+  try{
+    await initialize();
+  }finally{
+    await hideWcLoading_(true);
+  }
 });
 
+
+let wcReloading = false;
+let wcSwRefreshing = false;
+
+async function handleManualReload(){
+  wcViewCacheClear_();
+  if(wcReloading) return;
+  const btn = $("reloadBtn");
+  wcReloading = true;
+  if(btn){
+    btn.disabled = true;
+    btn.classList.add("is-loading");
+    btn.textContent = "↻";
+    btn.setAttribute("aria-label","更新中");
+    btn.title = "更新中…";
+  }
+  showWcLoading_("更新中…");
+  setStatus("更新中…");
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  try{
+    if("serviceWorker" in navigator){
+      const reg = await navigator.serviceWorker.getRegistration();
+      if(reg){ try{ await reg.update(); }catch(_e){} }
+    }
+    await initialize(true);
+    setStatus("最新情報に更新しました。");
+  }catch(err){
+    setStatus("更新に失敗しました。もう一度お試しください。");
+    console.error("manual reload failed", err);
+  }finally{
+    await hideWcLoading_(true);
+    if(btn){
+      btn.disabled = false;
+      btn.classList.remove("is-loading");
+      btn.textContent = "↻";
+      btn.setAttribute("aria-label","再読み込み");
+      btn.title = "再読み込み";
+    }
+    wcReloading = false;
+  }
+}
+
+async function registerWonderCraftServiceWorker_(){
+  if(!("serviceWorker" in navigator)) return;
+
+  try{
+    const reg = await navigator.serviceWorker.register(
+      "./service-worker.js",
+      { updateViaCache:"none" }
+    );
+
+    await reg.update();
+
+    if(reg.waiting){
+      reg.waiting.postMessage({type:"SKIP_WAITING"});
+    }
+
+    reg.addEventListener("updatefound",()=>{
+      const worker = reg.installing;
+      if(!worker) return;
+
+      worker.addEventListener("statechange",()=>{
+        if(
+          worker.state === "installed" &&
+          navigator.serviceWorker.controller
+        ){
+          worker.postMessage({type:"SKIP_WAITING"});
+        }
+      });
+    });
+
+    navigator.serviceWorker.addEventListener("controllerchange",()=>{
+      if(wcSwRefreshing) return;
+      wcSwRefreshing = true;
+      window.location.reload();
+    });
+  }catch(err){
+    console.error("service worker update failed", err);
+  }
+}
+
+
+let wcLoadingDepth = 0;
+let wcLoadingShownAt = 0;
+const WC_LOADING_MIN_MS = 800;
+function showWcLoading_(message){
+  const overlay = $("wcLoadingOverlay");
+  const text = $("wcLoadingText");
+
+  wcLoadingDepth++;
+
+  if(wcLoadingDepth === 1){
+    wcLoadingShownAt = Date.now();
+  }
+
+  if(text) text.textContent = message || "読み込み中…";
+
+  if(overlay){
+    overlay.hidden = false;
+    overlay.setAttribute("aria-busy","true");
+  }
+}
+function updateWcLoadingText_(message){
+  const text = $("wcLoadingText");
+  if(text) text.textContent = message || "読み込み中…";
+}
+async function hideWcLoading_(force=false){
+  if(force) wcLoadingDepth = 0;
+  else wcLoadingDepth = Math.max(0, wcLoadingDepth - 1);
+
+  if(wcLoadingDepth > 0 && !force) return;
+
+  const elapsed = Date.now() - wcLoadingShownAt;
+  const wait = Math.max(0, WC_LOADING_MIN_MS - elapsed);
+
+  if(wait){
+    await new Promise(resolve => setTimeout(resolve, wait));
+  }
+
+  const overlay = $("wcLoadingOverlay");
+
+  if(overlay){
+    overlay.hidden = true;
+    overlay.setAttribute("aria-busy","false");
+  }
+}
+
+
+const WC_VIEW_CACHE_TTL = 60 * 1000;
+const wcViewCache = new Map();
+
+function wcViewCacheKey_(view, params){
+  return view + ":" + JSON.stringify(params || {});
+}
+function wcViewCacheGet_(view, params){
+  const key = wcViewCacheKey_(view, params);
+  const item = wcViewCache.get(key);
+  if(!item) return null;
+  if(Date.now() - item.savedAt > WC_VIEW_CACHE_TTL){
+    wcViewCache.delete(key);
+    return null;
+  }
+  return item.data;
+}
+function wcViewCachePut_(view, params, data){
+  wcViewCache.set(
+    wcViewCacheKey_(view, params),
+    {savedAt:Date.now(), data:data}
+  );
+}
+function wcViewCacheClear_(){
+  wcViewCache.clear();
+}
+
 function bindEvents(){
-  $("systemRetryBtn").onclick=()=>initialize(true);
+  $("systemRetryBtn").onclick=async()=>{showWcLoading_("再接続中…");try{await initialize(true)}finally{await hideWcLoading_(true)}};
   $("loginForm").onsubmit=handleLogin;
   $("logoutBtn").onclick=logout;
   $("forgotPasswordBtn").onclick=()=>showLoginMessage("パスワード再発行申請は次の段階で追加します。現在は自社担当者へご連絡ください。",false);
-  $("reloadBtn").onclick=()=>initialize(true);
+  $("reloadBtn").onclick=handleManualReload;
   $("searchInput").addEventListener("input",()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(loadCurrent,350)});
   $("staffFilter").onchange=loadCurrent;
   $("regionFilter").onchange=loadCurrent;
@@ -27,64 +188,94 @@ function bindEvents(){
   document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>switchView(b.dataset.view));
   document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeModal);
   $("editForm").onsubmit=saveEdit;
-  $("copyProposalBtn").onclick=copyProposal;
   $("openSkillSheetBtn").onclick=openSkillSheet;
+  $("runMatchingBtn")?.addEventListener("click",runCandidateMatching);
+  $("matchModeCandidateBtn")?.addEventListener("click",()=>setMatchingMode("candidate"));
+  $("matchModeJobBtn")?.addEventListener("click",()=>setMatchingMode("job"));
+  $("matchingJobSearch")?.addEventListener("input",e=>renderMatchingJobOptions(e.target.value));
   $("showPartnerRegisterBtn")?.addEventListener("click",()=>{const box=$("partnerRegisterBox");if(box)box.hidden=!box.hidden;});
   $("partnerRegisterBtn")?.addEventListener("click",submitPartnerRegistration);
-  $("reloadPartnerRequestsBtn")?.addEventListener("click",loadPartnerRequests);
-  $("reloadSkillRequestsBtn")?.addEventListener("click",loadSkillSheetRequests);
+  $("reloadPartnerRequestsBtn")?.addEventListener("click",async()=>{showWcLoading_("読み込み中…");try{await loadPartnerRequests()}finally{await hideWcLoading_()}});
+  $("reloadSkillRequestsBtn")?.addEventListener("click",async()=>{showWcLoading_("読み込み中…");try{await loadSkillSheetRequests()}finally{await hideWcLoading_()}});
   $("reloadPartnerPortalBtn")?.addEventListener("click",reloadPartnerPortal);
   $("partnerCandidatesTab")?.addEventListener("click",()=>showPartnerTab("candidates"));
   $("partnerRequestsTab")?.addEventListener("click",()=>showPartnerTab("requests"));
   $("partnerSearchInput")?.addEventListener("input",()=>{clearTimeout(partnerSearchTimer);partnerSearchTimer=setTimeout(reloadPartnerPortal,350);});
 }
 
+
+const WC_BOOT_CACHE_KEY="wc_boot_cache_v1";
+const WC_BOOT_CACHE_TTL=6*60*60*1000;
+function readBootCache(){try{const raw=localStorage.getItem(WC_BOOT_CACHE_KEY);if(!raw)return null;const obj=JSON.parse(raw);if(!obj||!obj.savedAt||Date.now()-obj.savedAt>WC_BOOT_CACHE_TTL)return null;return obj.data||null}catch(e){return null}}
+function writeBootCache(data){try{localStorage.setItem(WC_BOOT_CACHE_KEY,JSON.stringify({savedAt:Date.now(),data}))}catch(e){}}
+function applyBootstrapData(bootstrap){
+  state.user=bootstrap.user||null;applyRoleUi();
+  state.runtimeConfig=bootstrap.config||{};
+  if(state.user?.role==="partner"){updateUserUi();$("appPanel").hidden=false;hideSystemPanel();showPartnerPortal(bootstrap);return "partner"}
+  updateUserUi();const filters=bootstrap.filters||{};state.progressStatuses=filters.progressStatuses||[];
+  fillSelect("staffFilter",filters.staff||[],"担当者：全員");fillSelect("regionFilter",filters.regions||[],"地域：すべて");
+  renderDashboard(bootstrap.dashboard||{});state.today=bootstrap.today||[];$("appPanel").hidden=false;hideSystemPanel();applyViewState();if(state.view==="home")renderToday(state.today);return "internal";
+}
+
 async function initialize(force=false){
+  let usedCache=false;
   try{
     hideLogin();
-    if($("appPanel").hidden){
-      $("systemPanel").hidden=false;
-      $("systemTitle").textContent="接続確認中";
-      $("systemMessage").textContent="システムへ接続しています。";
-      $("systemRetryBtn").hidden=true;
-    }
     const api=getApi();
     if(!api||api.includes("ここにGAS"))return showMaintenance("現在システムメンテナンス中です。しばらくしてから再度お試しください。");
-
     const token=getToken();
     if(!token)return showLogin();
 
-    const bootstrap=await apiGet("bootstrap",{},api,token);
-    state.user=bootstrap.user||null;
-    applyRoleUi();
-    if(state.user && ["admin","staff"].includes(state.user.role)){
-      setTimeout(()=>{loadPartnerRequests();loadSkillSheetRequests();},0);
-    }
-    state.runtimeConfig=bootstrap.config||{};
-    if(state.runtimeConfig.maintenance)return showMaintenance(state.runtimeConfig.maintenanceMessage||"現在メンテナンス中です。");
-    if(state.user?.role==="partner"){
-      updateUserUi();
-      $("appPanel").hidden=false;
-      hideSystemPanel();
-      showPartnerPortal(bootstrap);
-      return;
+    if(!force){
+      const cached=readBootCache();
+      if(cached){
+        const role=applyBootstrapData(cached);
+        usedCache=true;
+        if(role==="internal"&&state.user&&["admin","staff"].includes(state.user.role))setTimeout(()=>{loadPartnerRequests();loadSkillSheetRequests();},1200);
+      }
     }
 
-    updateUserUi();
-    const filters=bootstrap.filters||{};
-    state.progressStatuses=filters.progressStatuses||[];
-    fillSelect("staffFilter",filters.staff||[],"担当者：全員");
-    fillSelect("regionFilter",filters.regions||[],"地域：すべて");
-    renderDashboard(bootstrap.dashboard||{});
-    state.today=bootstrap.today||[];
-    $("appPanel").hidden=false;
-    hideSystemPanel();
+    if(!usedCache&&$("appPanel").hidden){
+      $("systemPanel").hidden=false;$("systemTitle").textContent="接続確認中";$("systemMessage").textContent="システムへ接続しています。";$("systemRetryBtn").hidden=true;
+    }
+
+    const bootstrap=await apiGet("bootstrap",{},api,token);
+    if(bootstrap?.config?.maintenance)return showMaintenance(bootstrap.config.maintenanceMessage||"現在メンテナンス中です。");
+    const role=applyBootstrapData(bootstrap);
+    writeBootCache({user:bootstrap.user||null,config:bootstrap.config||{},filters:bootstrap.filters||{},dashboard:bootstrap.dashboard||{},today:bootstrap.today||[]});
+    if(state.user&&["admin","staff"].includes(state.user.role))setTimeout(()=>{loadPartnerRequests();loadSkillSheetRequests();},1200);
     if(force)setStatus("最新情報を読み込みました。");
-    applyViewState();
-    if(state.view==="home")renderToday(state.today);else await loadCurrent();
+    if(role==="internal"&&state.view!=="home")await loadCurrent();
   }catch(error){
-    if(isAuthError(error)){clearToken();state.user=null;updateUserUi();return showLogin("ログインの有効期限が切れました。もう一度ログインしてください。");}
-    showMaintenance("現在システムメンテナンス中です。しばらくしてから再度お試しください。");
+    console.error("WonderCraft bootstrap error:", error);
+
+    if(isAuthError(error)){
+      clearToken();
+      state.user=null;
+      updateUserUi();
+      return showLogin("ログインの有効期限が切れました。もう一度ログインしてください。");
+    }
+
+    /*
+     * 起動時bootstrap失敗時に「メンテナンス中」で固定しない。
+     * 古い/不整合なセッションが残っている場合は一度ログイン画面へ戻し、
+     * 新しいセッションを作り直せるようにする。
+     */
+    if(!usedCache){
+      clearToken();
+      state.user=null;
+      updateUserUi();
+
+      const detail = error?.message
+        ? "（" + error.message + "）"
+        : "";
+
+      return showLogin(
+        "接続情報を更新しました。もう一度ログインしてください。" + detail
+      );
+    }
+
+    setStatus("最新情報の同期に失敗しました。前回データを表示しています。");
   }
 }
 
@@ -177,7 +368,7 @@ async function loadDashboard(){try{renderDashboard(await apiGet("dashboard"))}ca
 function renderDashboard(d){$("countCandidates").textContent=d.candidates??"-";$("countProgress").textContent=d.progress??"-";$("countToday").textContent=d.todayInterviews??"-";$("countWaiting").textContent=d.waitingCandidates??"-"}
 
 function switchView(view){
-  if(!["home","candidates","progress"].includes(view))view="home";
+  if(!["home","candidates","progress","matching"].includes(view))view="home";
   state.view=view;
   applyViewState();
   loadCurrent();
@@ -186,10 +377,12 @@ function switchView(view){
 function applyViewState(){
   document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===state.view));
   const isHome=state.view==="home";
+  const isMatching=state.view==="matching";
   $("dashboardSection").hidden=!isHome;
   $("homeHeader").hidden=!isHome;
-  $("listHeader").hidden=isHome;
-  $("filterSection").hidden=isHome;
+  $("matchingSection").hidden=!isMatching;
+  $("listHeader").hidden=isHome||isMatching;
+  $("filterSection").hidden=isHome||isMatching;
 
   if(state.view==="candidates"){
     $("viewTitle").textContent="求職者";
@@ -209,29 +402,82 @@ function applyViewState(){
 }
 
 async function loadCurrent(){
-  if($("appPanel").hidden)return;
-  const requestId=++loadRequestId;
-  showLoading();
-  try{
-    const p={q:$("searchInput").value,staff:$("staffFilter").value};
-    let items;
-    if(state.view==="home"){
-      items=await apiGet("today");
-      if(requestId!==loadRequestId)return;
-      state.today=items;renderToday(items);
-    }else if(state.view==="candidates"){
-      p.region=$("regionFilter").value;
-      p.experienceType=$("experienceFilter").value;
-      p.careerType=$("careerFilter").value;
-      items=await apiGet("candidates",p);
-      if(requestId!==loadRequestId)return;
-      state.candidates=items;renderCandidates(items);
-    }else{
-      items=await apiGet("progress",p);
-      if(requestId!==loadRequestId)return;
-      state.progress=items;renderProgress(items);
+  if($("appPanel").hidden) return;
+
+  const requestId = ++loadRequestId;
+  const p = {
+    q: $("searchInput").value,
+    staff: $("staffFilter").value
+  };
+
+  if(state.view==="matching"){
+    showWcLoading_("読み込み中…");
+    try{
+      setStatus("");
+      $("cards").innerHTML="";
+      if(matchingMode==="candidate") await loadMatchingCandidatesOnce();
+      else await loadMatchingJobsOnce();
+    }finally{
+      await hideWcLoading_();
     }
-  }catch(e){if(requestId===loadRequestId)showError(e)}
+    return;
+  }
+
+  if(state.view==="home"){
+    showWcLoading_("読み込み中…");
+    try{
+      const items=await apiGet("today");
+      if(requestId!==loadRequestId) return;
+      state.today=items;
+      renderToday(items);
+    }finally{
+      await hideWcLoading_();
+    }
+    return;
+  }
+
+  if(state.view==="candidates"){
+    p.region=$("regionFilter").value;
+    p.experienceType=$("experienceFilter").value;
+    p.careerType=$("careerFilter").value;
+  }
+
+  const cacheView = state.view==="candidates" ? "candidates" : "progress";
+  const cached = wcViewCacheGet_(cacheView,p);
+
+  if(cached){
+    if(cacheView==="candidates"){
+      state.candidates=cached;
+      renderCandidates(cached);
+    }else{
+      state.progress=cached;
+      renderProgress(cached);
+    }
+    return;
+  }
+
+  showWcLoading_("読み込み中…");
+  try{
+    const items = cacheView==="candidates"
+      ? await apiGet("candidates",p)
+      : await apiGet("progress",p);
+
+    if(requestId!==loadRequestId) return;
+
+    wcViewCachePut_(cacheView,p,items);
+
+    if(cacheView==="candidates"){
+      state.candidates=items;
+      renderCandidates(items);
+    }else{
+      state.progress=items;
+      renderProgress(items);
+    }
+  }catch(e){
+    if(requestId===loadRequestId) showError(e);
+  }finally{
+    await hideWcLoading_();
+  }
 }
 
 function renderCandidates(items){
@@ -278,8 +524,8 @@ function normalizeInterviewTime(value){
 }
 
 function rows(arr){return arr.map(([a,b])=>`<div class="label">${esc(a)}</div><div>${esc(b||"")}</div>`).join("")}
-function openCandidate(i){state.selected={type:"candidate",item:state.candidates[i]};$("modalTitle").textContent="求職者を編集";$("copyProposalBtn").hidden=false;buildCandidateForm(state.selected.item);updateSkillSheetButton();openModal()}
-function openProgress(i){state.selected={type:"progress",item:state.progress[i]};$("modalTitle").textContent="案件進捗を編集";$("copyProposalBtn").hidden=true;$("openSkillSheetBtn").hidden=true;buildProgressForm(state.selected.item);openModal()}
+function openCandidate(i){state.selected={type:"candidate",item:state.candidates[i]};$("modalTitle").textContent="求職者を編集";buildCandidateForm(state.selected.item);updateSkillSheetButton();openModal()}
+function openProgress(i){state.selected={type:"progress",item:state.progress[i]};$("modalTitle").textContent="案件進捗を編集";$("openSkillSheetBtn").hidden=true;buildProgressForm(state.selected.item);openModal()}
 
 function field(id,label,value,type="text",options=null,full=false){
   const cls=full?' class="full"':"";
@@ -336,7 +582,8 @@ function buildProgressForm(x){
 }
 
 async function saveEdit(e){
-  e.preventDefault();setMsg("modalMessage","保存中...");
+  wcViewCacheClear_();
+  e.preventDefault();setMsg("modalMessage","保存中...");showWcLoading_("保存中…");
   try{
     if(state.selected.type==="candidate"){
       const x=state.selected.item;
@@ -349,15 +596,9 @@ async function saveEdit(e){
     closeModal();
     await Promise.allSettled([loadDashboard(), loadCurrent()]);
     setStatus("保存しました。");
-  }catch(err){setMsg("modalMessage",err.message,"error")}
+  }catch(err){setMsg("modalMessage",err.message,"error")}finally{await hideWcLoading_();}
 }
 
-async function copyProposal(){try{const p={station:v("fStation"),prefecture:v("fPref"),career:selectedCareerValue(),experience:v("fExp"),remarks:v("fRemarks"),startDate:v("fStart"),price:v("fPrice")};const text=await apiPost("proposalText",p);await copyText(text);setMsg("modalMessage","紹介文をコピーしました。","success")}catch(e){setMsg("modalMessage",e.message,"error")}}
-async function copyText(text){
-  if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return}
-  const area=document.createElement("textarea");area.value=text;area.setAttribute("readonly","");area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();
-  const ok=document.execCommand("copy");area.remove();if(!ok)throw new Error("コピーできませんでした。文章を長押ししてコピーしてください。");
-}
 function updateSkillSheetButton(){const btn=$("openSkillSheetBtn");if(!btn)return;btn.hidden=!isSafeSkillSheetUrl(v("fSkillSheetUrl"))}
 function isSafeSkillSheetUrl(value){try{const url=new URL(String(value||"").trim());return url.protocol==="https:"&&(url.hostname==="drive.google.com"||url.hostname==="docs.google.com")}catch(_){return false}}
 function openSkillSheet(){const url=v("fSkillSheetUrl");if(!isSafeSkillSheetUrl(url)){setMsg("modalMessage","Google DriveまたはGoogleドキュメントのURLを入力してください。","error");return}window.open(url,"_blank","noopener,noreferrer")}
@@ -367,7 +608,27 @@ function closeModal(){$("modal").hidden=true;document.body.style.overflow=""}
 function showLoading(){setStatus("");$("cards").innerHTML='<div class="loading">読み込み中です...</div>'}
 function showEmpty(t="該当するデータはありません。"){$("cards").innerHTML=`<div class="empty">${esc(t)}</div>`}
 function showError(e){$("cards").innerHTML=`<div class="error">${esc(e.message||String(e))}</div>`}
-function setStatus(t){$("status").textContent=t||""}
+function setStatus(t){const el=$("status");if(el)el.textContent=t||""}
+function showToast(message,type=""){
+  const text=String(message||"");
+  const status=$("status");
+  if(status){
+    status.textContent=text;
+    status.className=type==="error"?"error":"";
+  }
+  const summary=$("matchingSummary");
+  if(state.view==="matching"&&summary&&text){
+    summary.textContent=text;
+    summary.className="matching-summary"+(type==="error"?" error":"");
+  }
+  if(text){
+    clearTimeout(showToast._timer);
+    showToast._timer=setTimeout(()=>{
+      if(status&&status.textContent===text){status.textContent="";status.className="";}
+      if(summary&&summary.textContent===text){summary.textContent="";summary.className="matching-summary";}
+    },4500);
+  }
+}
 function setMsg(id,t,type=""){$(id).textContent=t||"";$(id).className="message"+(type?" "+type:"")}
 function esc(x){return String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
 
@@ -388,6 +649,7 @@ async function submitPartnerRegistration(){
 }
 
 async function loadPartnerRequests(){
+  setRequestPanelVisible_("partnerRequestsList", false);
   if(!state.user || !["admin","staff"].includes(state.user.role)) return;
   const panel=document.getElementById("partnerApprovalPanel");
   const list=document.getElementById("partnerRequestsList");
@@ -396,7 +658,12 @@ async function loadPartnerRequests(){
   list.innerHTML='<div class="empty">読み込み中...</div>';
   try{
     const rows=await apiPost("partnerRequests",{});
-    if(!Array.isArray(rows)||!rows.length){list.innerHTML='<div class="empty">登録申請はありません。</div>';return;}
+    if(!Array.isArray(rows)||!rows.length){
+      list.innerHTML='<div class="empty">登録申請はありません。</div>';
+      setRequestPanelVisible_("partnerRequestsList", false);
+      return;
+    }
+    setRequestPanelVisible_("partnerRequestsList", true);
     list.innerHTML=rows.map(r=>`
       <div class="partner-request-card">
         <div class="partner-request-main">
@@ -411,6 +678,7 @@ async function loadPartnerRequests(){
         </div>`:""}
       </div>`).join("");
   }catch(err){
+    setRequestPanelVisible_("partnerRequestsList", false);
     list.innerHTML='<div class="empty">申請一覧を取得できませんでした。</div>';
   }
 }
@@ -534,13 +802,39 @@ function showPartnerTab(tab){
   $("partnerRequestsTab").classList.toggle("active",!candidates);
 }
 
+
+function setRequestPanelVisible_(listId, visible){
+  const panelId =
+    listId === "partnerRequestsList"
+      ? "partnerRequestsPanel"
+      : listId === "skillRequestsList"
+        ? "skillRequestsPanel"
+        : "";
+
+  const panel =
+    panelId
+      ? document.getElementById(panelId)
+      : null;
+
+  if(!panel) return;
+
+  panel.hidden = !visible;
+  panel.style.display = visible ? "" : "none";
+}
+
 async function loadSkillSheetRequests(){
+  setRequestPanelVisible_("skillRequestsList", false);
   if(!state.user||!["admin","staff"].includes(state.user.role))return;
   const list=$("skillRequestsList"); if(!list)return;
   list.innerHTML='<div class="empty">読み込み中...</div>';
   try{
     const rows=await apiPost("skillSheetRequests",{});
-    if(!Array.isArray(rows)||!rows.length){list.innerHTML='<div class="empty">スキルシート申請はありません。</div>';return;}
+    if(!Array.isArray(rows)||!rows.length){
+      list.innerHTML='<div class="empty">スキルシート申請はありません。</div>';
+      setRequestPanelVisible_("skillRequestsList", false);
+      return;
+    }
+    setRequestPanelVisible_("skillRequestsList", true);
     list.innerHTML=rows.map(r=>`<div class="partner-request-card">
       <div class="partner-request-main">
         <strong>${esc(r.candidateName||"")}</strong>
@@ -552,7 +846,10 @@ async function loadSkillSheetRequests(){
         <button class="secondary" onclick="rejectSkillRequest('${esc(r.requestId)}')">却下</button>
       </div>`:(r.status==="承認済み"&&r.skillSheetUrl?`<a class="secondary link-button" href="${esc(r.skillSheetUrl)}" target="_blank" rel="noopener">確認</a>`:"")}
     </div>`).join("");
-  }catch(err){list.innerHTML='<div class="empty">申請一覧を取得できませんでした。</div>';}
+  }catch(err){
+    setRequestPanelVisible_("skillRequestsList", false);
+    list.innerHTML='<div class="empty">申請一覧を取得できませんでした。</div>';
+  }
 }
 
 async function approveSkillRequest(requestId){
@@ -565,3 +862,156 @@ async function rejectSkillRequest(requestId){
   try{await apiPost("rejectSkillSheetRequest",{requestId,reason});showToast("却下しました。");await loadSkillSheetRequests();}
   catch(err){showToast(err?.message||"却下に失敗しました。","error");}
 }
+
+
+let matchingCandidatesLoaded=false;
+let matchingJobsLoaded=false;
+let matchingCandidateItems=[];
+let matchingJobItems=[];
+let matchingMode="candidate";
+
+async function loadMatchingCandidatesOnce(){
+  if(matchingCandidatesLoaded)return;
+  const select=$("matchingCandidateSelect"),summary=$("matchingSummary");
+  if(!select)return;
+  select.disabled=true; select.innerHTML='<option value="">求職者を読み込み中...</option>';
+  try{
+    const items=await apiGet("matchingCandidates");
+    matchingCandidateItems=Array.isArray(items)?items:[];
+    select.innerHTML='<option value="">求職者を選択</option>'+matchingCandidateItems.map((x,i)=>
+      `<option value="${i}">${esc(x.name||"")}｜${esc(x.prefecture||"")} ${esc(x.station||"")}｜${esc(x.experience||"")}</option>`).join("");
+    matchingCandidatesLoaded=true;
+    if(summary)summary.textContent=`求職者 ${matchingCandidateItems.length}名を読み込みました。`;
+  }catch(err){
+    select.innerHTML='<option value="">求職者を取得できませんでした</option>';
+    if(summary)summary.textContent=err?.message||"求職者一覧を取得できませんでした。";
+  }finally{select.disabled=false;}
+}
+
+async function loadMatchingJobsOnce(){
+  if(matchingJobsLoaded)return;
+  const select=$("matchingJobSelect"),summary=$("matchingSummary");
+  if(!select)return;
+  select.disabled=true; select.innerHTML='<option value="">案件を読み込み中...</option>';
+  try{
+    const items=await apiGet("matchingJobs");
+    matchingJobItems=Array.isArray(items)?items:[];
+    matchingJobsLoaded=true; renderMatchingJobOptions("");
+    if(summary)summary.textContent=`案件 ${matchingJobItems.length}件を読み込みました。`;
+  }catch(err){
+    select.innerHTML='<option value="">案件を取得できませんでした</option>';
+    if(summary)summary.textContent=err?.message||"案件一覧を取得できませんでした。";
+  }finally{select.disabled=false;}
+}
+
+function renderMatchingJobOptions(query){
+  const select=$("matchingJobSelect");if(!select)return;
+  const q=String(query||"").normalize("NFKC").toLowerCase().trim();
+  const filtered=matchingJobItems.map((x,i)=>({x,i})).filter(({x})=>{
+    if(!q)return true;
+    return [x.shopName,x.prefecture,x.area,x.sourceCompany,x.price].join(" ").normalize("NFKC").toLowerCase().includes(q);
+  }).slice(0,300);
+  select.innerHTML='<option value="">案件を選択</option>'+filtered.map(({x,i})=>
+    `<option value="${i}">${esc(x.shopName||"案件名未設定")}｜${esc(x.prefecture||x.area||"")}｜${esc(x.price||"")}</option>`).join("");
+}
+
+async function setMatchingMode(mode){
+  matchingMode=mode==="job"?"job":"candidate";
+  $("matchModeCandidateBtn")?.classList.toggle("active",matchingMode==="candidate");
+  $("matchModeJobBtn")?.classList.toggle("active",matchingMode==="job");
+  $("matchingCandidateLabel").hidden=matchingMode!=="candidate";
+  $("matchingJobLabel").hidden=matchingMode!=="job";
+  $("runMatchingBtn").textContent=matchingMode==="candidate"?"おすすめ案件を探す":"おすすめ求職者を探す";
+  $("matchingResults").innerHTML=""; $("matchingSummary").textContent="";
+  if(matchingMode==="candidate")await loadMatchingCandidatesOnce(); else await loadMatchingJobsOnce();
+}
+
+async function runCandidateMatching(){
+  showWcLoading_("マッチング中…");
+  if(matchingMode==="job")return runJobMatching();
+  const raw=$("matchingCandidateSelect")?.value??"";
+  if(raw===""){showToast("求職者を選択してください。","error");return;}
+  const c=matchingCandidateItems[Number(raw)];
+  if(!c){showToast("求職者の選択情報が正しくありません。","error");return;}
+  const results=$("matchingResults"),summary=$("matchingSummary");
+  results.innerHTML='<div class="loading">案件を比較中...</div>'; summary.textContent="";
+  try{
+    const data=await apiPost("candidateJobMatches",{sheetName:c.sheetName,rowNumber:c.rowNumber});
+    summary.textContent=`${data.candidate.name}さん｜全${data.totalJobs}件 → 条件絞込${data.filteredJobs ?? data.totalJobs}件 → 重複整理${data.dedupedJobs ?? data.filteredJobs ?? data.totalJobs}件｜おすすめ上位${(data.results||[]).length}件`;
+    renderJobMatchResults(data.results||[]);
+  }catch(err){
+    const message=err?.message||"マッチングに失敗しました。";
+    results.innerHTML=`<div class="error">${esc(message)}</div>`; summary.textContent=message;
+  }
+  await hideWcLoading_();
+}
+
+async function runJobMatching(){
+  showWcLoading_("マッチング中…");
+  const raw=$("matchingJobSelect")?.value??"";
+  if(raw===""){showToast("案件を選択してください。","error");return;}
+  const job=matchingJobItems[Number(raw)];
+  if(!job){showToast("案件の選択情報が正しくありません。","error");return;}
+  const results=$("matchingResults"),summary=$("matchingSummary");
+  results.innerHTML='<div class="loading">求職者を比較中...</div>'; summary.textContent="";
+  try{
+    const data=await apiPost("jobCandidateMatches",{rowNumber:job.rowNumber});
+    summary.textContent=`${data.job.shopName||"選択案件"}｜求職者${data.totalCandidates}名 → 条件絞込${data.filteredCandidates ?? data.totalCandidates}名｜おすすめ上位${(data.results||[]).length}名`;
+    renderCandidateMatchResults(data.results||[]);
+  }catch(err){
+    const message=err?.message||"マッチングに失敗しました。";
+    results.innerHTML=`<div class="error">${esc(message)}</div>`; summary.textContent=message;
+  }
+  await hideWcLoading_();
+}
+
+function matchBadges(x){
+  return `<div class="match-meta"><span class="match-grade">${esc(x.grade||"")}</span>`+
+    (x.reasons||[]).map(v=>`<span class="match-reason">${esc(v)}</span>`).join("")+
+    (x.cautions||[]).map(v=>`<span class="match-caution">${esc(v)}</span>`).join("")+`</div>`;
+}
+
+function renderJobMatchResults(items){
+  const box=$("matchingResults");if(!box)return;
+  if(!items.length){box.innerHTML='<div class="empty">マッチする案件がありません。</div>';return;}
+  box.innerHTML=items.map(x=>`<article class="card match-card">
+    <div class="match-score">${Number(x.percent||0)}%</div>
+    <h3>${esc(x.shopName||"案件名未設定")}</h3>${matchBadges(x)}
+    <div class="details">${rows([
+      ["案件元",x.sourceCompany],["エリア",x.area],["都道府県",x.prefecture],
+      ["通勤条件",x.commuteLimitExplicit
+        ? `本人上限${x.commuteLimitMinutes||"-"}分（+10分まで△表示）`
+        : "未記載：60分以内◎／61〜90分△"],
+      ["通勤判定",x.commuteLabel||x.commuteStatus||"要確認"],
+      ["通勤時間",x.commuteMinutes!=null?`約${x.commuteMinutes}分`:"要確認"],
+      ["通勤補正",Number(x.commutePenalty||0)>0?`-${Number(x.commutePenalty)}点`:"なし"],
+      ["単価",x.price],["未経験",x.beginnerAvailability],["稼働日数",x.workDays],
+      ["勤務時間",x.workTime],["休日",x.holiday]
+    ])}</div>${x.originalText?`<div class="remarks">${esc(x.originalText)}</div>`:""}
+  </article>`).join("");
+}
+
+function renderCandidateMatchResults(items){
+  const box=$("matchingResults");if(!box)return;
+  if(!items.length){box.innerHTML='<div class="empty">マッチする求職者がいません。</div>';return;}
+  box.innerHTML=items.map(x=>`<article class="card match-card">
+    <div class="match-score">${Number(x.percent||0)}%</div>
+    <h3>${esc(x.name||"名前未設定")}</h3>${matchBadges(x)}
+    <div class="details">${rows([
+      ["都道府県",x.prefecture],["最寄駅",x.station],["希望単価",x.price],
+      ["キャリア",x.career],["経験",x.experience],["開始希望",x.startDate],["地域",x.region]
+    ])}</div>${x.remarks?`<div class="remarks">${esc(x.remarks)}</div>`:""}
+  </article>`).join("");
+}
+
+
+
+
+
+
+
+
+
+
+
+
