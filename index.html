@@ -169,7 +169,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img src="./assets/icon-192.png" alt="WC">
       <div>
         <small>WonderCraft</small>
-        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-7.28</span></div>
+        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-7.29</span></div>
       </div>
     </div>
     <div class="top-actions"><span id="currentUserName" class="current-user" hidden></span><button id="logoutBtn" class="icon-btn logout-btn" type="button" aria-label="ログアウト" title="ログアウト" hidden>退出</button><button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button></div>
@@ -190,6 +190,17 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
           <button id="loginBtn" class="primary" type="submit">ログイン</button>
         </form>
         
+        <button id="showEmployeeRegisterBtn" class="text-btn" type="button">自社社員の初回登録はこちら</button>
+        <div id="employeeRegisterBox" class="partner-register-box" hidden>
+          <h3>自社社員 初回登録</h3>
+          <p class="login-help">登録申請後、管理者の承認が完了するとログインできます。</p>
+          <label>氏名<input id="employeeRegName" autocomplete="name"></label>
+          <label>メールアドレス<input id="employeeRegEmail" type="email" autocomplete="email"></label>
+          <label>パスワード<input id="employeeRegPassword" type="password" minlength="8" autocomplete="new-password"></label>
+          <button id="employeeRegisterBtn" class="primary" type="button">社員登録を申請</button>
+          <div id="employeeRegisterMessage" class="message" aria-live="polite"></div>
+        </div>
+
         <button id="showPartnerRegisterBtn" class="text-btn" type="button">他企業の新規登録はこちら</button>
         <div id="partnerRegisterBox" class="partner-register-box" hidden>
           <h3>他企業 新規登録申請</h3>
@@ -214,6 +225,14 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     <section id="appPanel" hidden>
       
       <section id="internalApprovalArea" class="approval-area" hidden>
+        <section class="approval-panel" id="employeeRequestsPanel" hidden>
+          <div class="approval-head"><div><p class="eyebrow">EMPLOYEE APPROVAL</p><h2>社員 登録申請</h2></div><button id="reloadEmployeeRequestsBtn" class="secondary" type="button">更新</button></div>
+          <div id="employeeRequestsList"></div>
+        </section>
+        <section class="approval-panel" id="userManagementPanel" hidden>
+          <div class="approval-head"><div><p class="eyebrow">USER MANAGEMENT</p><h2>ユーザー管理</h2></div><button id="reloadUsersBtn" class="secondary" type="button">更新</button></div>
+          <div id="usersList"></div>
+        </section>
         <section class="approval-panel" id="partnerRequestsPanel" hidden>
           <div class="approval-head"><div><p class="eyebrow">APPROVAL</p><h2>他企業 登録申請</h2></div><button id="reloadPartnerRequestsBtn" class="secondary" type="button">更新</button></div>
           <div id="partnerRequestsList"></div>
@@ -355,8 +374,8 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     </button>
   </nav>
 
-  <script src="./config.js?v=7.28.1"></script>
-  <script src="./app.js?v=7.28.1"></script>
+  <script src="./config.js?v=7.29.0-auth"></script>
+  <script src="./app.js?v=7.29.0-auth"></script>
 
   <div id="wcLoadingOverlay" class="wc-loading-overlay" aria-live="polite" aria-busy="true">
     <div class="wc-loading-box">

@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.28 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.29 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -11,7 +11,7 @@ window.addEventListener("load",async()=>{
   setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$('splash')?.remove(),450)},900);
   registerWonderCraftServiceWorker_();
   bindEvents();
-  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-7.28";
+  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-7.29";
   updateWcLoadingText_("読み込み中…");
   try{
     await initialize();
@@ -193,8 +193,12 @@ function bindEvents(){
   $("matchModeCandidateBtn")?.addEventListener("click",()=>setMatchingMode("candidate"));
   $("matchModeJobBtn")?.addEventListener("click",()=>setMatchingMode("job"));
   $("matchingJobSearch")?.addEventListener("input",e=>renderMatchingJobOptions(e.target.value));
+  $("showEmployeeRegisterBtn")?.addEventListener("click",()=>{const box=$("employeeRegisterBox");if(box)box.hidden=!box.hidden;});
+  $("employeeRegisterBtn")?.addEventListener("click",submitEmployeeRegistration);
   $("showPartnerRegisterBtn")?.addEventListener("click",()=>{const box=$("partnerRegisterBox");if(box)box.hidden=!box.hidden;});
   $("partnerRegisterBtn")?.addEventListener("click",submitPartnerRegistration);
+  $("reloadEmployeeRequestsBtn")?.addEventListener("click",async()=>{showWcLoading_("読み込み中…");try{await loadEmployeeRequests()}finally{await hideWcLoading_()}});
+  $("reloadUsersBtn")?.addEventListener("click",async()=>{showWcLoading_("読み込み中…");try{await loadUsers()}finally{await hideWcLoading_()}});
   $("reloadPartnerRequestsBtn")?.addEventListener("click",async()=>{showWcLoading_("読み込み中…");try{await loadPartnerRequests()}finally{await hideWcLoading_()}});
   $("reloadSkillRequestsBtn")?.addEventListener("click",async()=>{showWcLoading_("読み込み中…");try{await loadSkillSheetRequests()}finally{await hideWcLoading_()}});
   $("reloadPartnerPortalBtn")?.addEventListener("click",reloadPartnerPortal);
@@ -231,7 +235,7 @@ async function initialize(force=false){
       if(cached){
         const role=applyBootstrapData(cached);
         usedCache=true;
-        if(role==="internal"&&state.user&&["admin","staff"].includes(state.user.role))setTimeout(()=>{loadPartnerRequests();loadSkillSheetRequests();},1200);
+        if(role==="internal"&&state.user&&["admin","staff"].includes(state.user.role))setTimeout(()=>{if(state.user?.role==="admin"){loadEmployeeRequests();loadUsers();}loadPartnerRequests();loadSkillSheetRequests();},1200);
       }
     }
 
@@ -243,7 +247,7 @@ async function initialize(force=false){
     if(bootstrap?.config?.maintenance)return showMaintenance(bootstrap.config.maintenanceMessage||"現在メンテナンス中です。");
     const role=applyBootstrapData(bootstrap);
     writeBootCache({user:bootstrap.user||null,config:bootstrap.config||{},filters:bootstrap.filters||{},dashboard:bootstrap.dashboard||{},today:bootstrap.today||[]});
-    if(state.user&&["admin","staff"].includes(state.user.role))setTimeout(()=>{loadPartnerRequests();loadSkillSheetRequests();},1200);
+    if(state.user&&["admin","staff"].includes(state.user.role))setTimeout(()=>{if(state.user?.role==="admin"){loadEmployeeRequests();loadUsers();}loadPartnerRequests();loadSkillSheetRequests();},1200);
     if(force)setStatus("最新情報を読み込みました。");
     if(role==="internal"&&state.view!=="home")await loadCurrent();
   }catch(error){
@@ -304,6 +308,8 @@ function applyRoleUi(){
   document.body.dataset.role=role;
   const internal=["admin","staff"].includes(role);
   if($("internalApprovalArea")) $("internalApprovalArea").hidden=!internal;
+  if($("employeeRequestsPanel")) $("employeeRequestsPanel").hidden=role!=="admin";
+  if($("userManagementPanel")) $("userManagementPanel").hidden=role!=="admin";
   document.querySelector(".bottom-nav")?.toggleAttribute("hidden", role==="partner");
   if($("partnerPortal")) $("partnerPortal").hidden=role!=="partner";
   if(role==="partner"){
@@ -632,6 +638,15 @@ function showToast(message,type=""){
 function setMsg(id,t,type=""){$(id).textContent=t||"";$(id).className="message"+(type?" "+type:"")}
 function esc(x){return String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
 
+async function submitEmployeeRegistration(){
+  const name=$("employeeRegName")?.value.trim()||"",email=$("employeeRegEmail")?.value.trim()||"",password=$("employeeRegPassword")?.value||"",btn=$("employeeRegisterBtn"),message=$("employeeRegisterMessage");
+  if(!name||!email||password.length<8){message.textContent="氏名・メールアドレス・8文字以上のパスワードを入力してください。";message.className="message error";return;}
+  btn.disabled=true;btn.textContent="申請中…";message.textContent="";
+  try{const result=await publicPost("employeeRegister",{name,email,password});message.textContent=result?.message||"社員登録申請を受け付けました。";message.className="message success";$("employeeRegPassword").value="";}
+  catch(err){message.textContent=err?.message||"登録申請に失敗しました。";message.className="message error";}
+  finally{btn.disabled=false;btn.textContent="社員登録を申請";}
+}
+
 async function submitPartnerRegistration(){
   const company=document.getElementById("regCompany")?.value.trim()||"";
   const person=document.getElementById("regPerson")?.value.trim()||"";
@@ -802,6 +817,12 @@ function showPartnerTab(tab){
   $("partnerRequestsTab").classList.toggle("active",!candidates);
 }
 
+
+async function loadEmployeeRequests(){if(!state.user||state.user.role!=="admin")return;const panel=$("employeeRequestsPanel"),list=$("employeeRequestsList");if(!panel||!list)return;panel.hidden=true;try{const rows=await apiPost("employeeRequests",{}),pending=(rows||[]).filter(r=>r.status==="申請中");if(!pending.length){list.innerHTML="";return;}panel.hidden=false;list.innerHTML=pending.map(r=>`<div class="partner-request-card"><div class="partner-request-main"><strong>${esc(r.name||"")}</strong><div>${esc(r.email||"")}</div><small>申請日時：${esc(r.requestedAt||"")}</small></div><div class="partner-request-actions"><button class="primary" onclick="approveEmployeeRequest('${esc(r.requestId)}')">承認</button><button class="secondary" onclick="rejectEmployeeRequest('${esc(r.requestId)}')">却下</button></div></div>`).join("");}catch(err){panel.hidden=true;}}
+async function approveEmployeeRequest(requestId){if(!confirm("この社員登録を承認しますか？"))return;try{await apiPost("approveEmployee",{requestId});showToast("社員登録を承認しました。");await Promise.all([loadEmployeeRequests(),loadUsers()]);}catch(err){showToast(err?.message||"承認に失敗しました。","error");}}
+async function rejectEmployeeRequest(requestId){const reason=prompt("却下理由（任意）","");if(reason===null)return;try{await apiPost("rejectEmployee",{requestId,reason});showToast("社員登録申請を却下しました。");await loadEmployeeRequests();}catch(err){showToast(err?.message||"却下に失敗しました。","error");}}
+async function loadUsers(){if(!state.user||state.user.role!=="admin")return;const panel=$("userManagementPanel"),list=$("usersList");if(!panel||!list)return;try{const rows=await apiPost("users",{});panel.hidden=false;list.innerHTML=(rows||[]).map(u=>{const isCurrent=u.userId===state.user.userId;const action=u.status==="有効"?`<button class="secondary" ${isCurrent?"disabled":""} onclick="changeUserStatus('${esc(u.userId)}','利用停止')">利用停止</button>`:`<button class="primary" onclick="changeUserStatus('${esc(u.userId)}','有効')">利用再開</button>`;return `<div class="partner-request-card"><div class="partner-request-main"><strong>${esc(u.name||u.email||"")}</strong><div>${esc(u.email||"")} / ${esc(roleLabel(u.role))}</div><small>状態：${esc(u.status||"")}　最終ログイン：${esc(u.lastLoginAt||"-")}</small></div><div class="partner-request-actions">${action}</div></div>`;}).join("");}catch(err){panel.hidden=true;}}
+async function changeUserStatus(userId,status){const label=status==="有効"?"利用を再開":"利用停止";if(!confirm(`${label}しますか？`))return;try{await apiPost("setUserStatus",{userId,status});showToast(status==="有効"?"利用を再開しました。":"利用停止にしました。");await loadUsers();}catch(err){showToast(err?.message||"更新に失敗しました。","error");}}
 
 function setRequestPanelVisible_(listId, visible){
   const panelId =
