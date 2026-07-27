@@ -936,3 +936,144 @@ main{max-width:1480px;padding:18px 24px 100px}
 .bottom-nav button[data-view="candidates"] > span:first-child,.bottom-nav button[data-view="progress"] > span:first-child{font-size:29px!important;}
 }
 
+
+
+/* WC-7.32.5 exact slider centering + user chevron */
+
+/* Remove normal input-box styling from all range controls */
+.job-filter-panel input[type="range"],
+.dual-range input[type="range"]{
+  border:0!important;
+  outline:0!important;
+  box-shadow:none!important;
+  border-radius:0!important;
+  min-height:0!important;
+  max-height:none!important;
+  padding:0!important;
+  background:transparent!important;
+}
+
+/* Single slider: one rail exactly through thumb center */
+.job-filter-panel input[type="range"]:not(.dual-range input){
+  -webkit-appearance:none!important;
+  appearance:none!important;
+  display:block!important;
+  width:100%!important;
+  height:30px!important;
+  margin:0!important;
+}
+
+.job-filter-panel input[type="range"]::-webkit-slider-runnable-track{
+  height:4px!important;
+  border:0!important;
+  border-radius:999px!important;
+  background:#d8e0ea!important;
+}
+
+.job-filter-panel input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none!important;
+  appearance:none!important;
+  width:26px!important;
+  height:26px!important;
+  border-radius:50%!important;
+  border:1px solid #d4dde8!important;
+  background:#fff!important;
+  box-shadow:0 2px 7px rgba(19,47,86,.16)!important;
+  margin-top:-11px!important;
+}
+
+.job-filter-panel input[type="range"]::-moz-range-track{
+  height:4px!important;
+  border:0!important;
+  border-radius:999px!important;
+  background:#d8e0ea!important;
+}
+
+.job-filter-panel input[type="range"]::-moz-range-thumb{
+  width:26px!important;
+  height:26px!important;
+  border-radius:50%!important;
+  border:1px solid #d4dde8!important;
+  background:#fff!important;
+  box-shadow:0 2px 7px rgba(19,47,86,.16)!important;
+}
+
+/* Dual slider: only the custom rail is visible */
+.dual-range{
+  position:relative!important;
+  height:30px!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  background:transparent!important;
+  overflow:visible!important;
+}
+
+.dual-range::before{
+  content:""!important;
+  position:absolute!important;
+  left:0!important;
+  right:0!important;
+  top:13px!important;
+  height:4px!important;
+  border-radius:999px!important;
+  background:#d8e0ea!important;
+  z-index:1!important;
+}
+
+.dual-range input[type="range"]{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:30px!important;
+  margin:0!important;
+  pointer-events:none!important;
+  z-index:2!important;
+}
+
+.dual-range input[type="range"]::-webkit-slider-runnable-track{
+  height:4px!important;
+  background:transparent!important;
+}
+
+.dual-range input[type="range"]::-moz-range-track{
+  height:4px!important;
+  background:transparent!important;
+}
+
+.dual-range input[type="range"]::-webkit-slider-thumb{
+  pointer-events:auto!important;
+  margin-top:-11px!important;
+  position:relative!important;
+  z-index:5!important;
+}
+
+.dual-range input[type="range"]::-moz-range-thumb{
+  pointer-events:auto!important;
+  position:relative!important;
+  z-index:5!important;
+}
+
+/* Larger and visually centered account dropdown arrow */
+.user-menu-chevron{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  width:24px!important;
+  height:24px!important;
+  margin-left:3px!important;
+  font-size:24px!important;
+  font-weight:900!important;
+  line-height:1!important;
+  color:#18263a!important;
+  transform:translateY(-2px)!important;
+}
+
+@media (max-width:700px){
+  .user-menu-chevron{
+    width:22px!important;
+    height:22px!important;
+    font-size:22px!important;
+  }
+}
+
