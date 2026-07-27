@@ -1,13 +1,13 @@
-const CACHE="wondercraft-wc-7-29-auth";
+const CACHE="wondercraft-wc-7-32-4-final-polish";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.23.0",
-  "./config.js?v=7.29.0-auth",
-  "./app.js?v=7.29.0-auth",
+  "./style.css?v=7.32.4-final-polish",
+  "./config.js?v=7.32.4-final-polish",
+  "./app.js?v=7.32.4-final-polish",
   "./manifest.json",
   "./offline.html",
-  "./assets/icon-192.png",
+  "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",
   "./assets/icon-512.png",
   "./assets/icon-1024.png"
 ];

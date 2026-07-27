@@ -155,24 +155,131 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   to{transform:rotate(360deg)}
 }
 
+
+.job-check-row{
+  display:flex!important;
+  flex-direction:row!important;
+  align-items:center;
+  gap:10px;
+  padding:10px 0;
+}
+.job-check-row input{
+  width:20px;
+  height:20px;
+  margin:0;
+}
+.home-notice-only{
+  padding-top:0!important;
+}
+
+
+.brand img,
+.brand-logo,
+.header-logo{
+  width:72px!important;
+  height:52px!important;
+  object-fit:contain!important;
+  object-position:center!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  background:transparent!important;
+}
+.user-menu-trigger{
+  display:flex!important;
+  align-items:center!important;
+  gap:8px!important;
+  min-height:48px!important;
+  padding:0 16px!important;
+  border:1px solid #d8e1ee!important;
+  border-radius:16px!important;
+  background:#fff!important;
+  color:#152238!important;
+  font:inherit!important;
+  font-weight:700!important;
+  box-shadow:0 4px 14px rgba(31,65,114,.06)!important;
+}
+.user-menu-trigger:hover{
+  border-color:#a9c3ea!important;
+  background:#f8fbff!important;
+}
+.user-avatar{
+  color:#0f62d6!important;
+  font-size:0!important;
+}
+.user-avatar::before{
+  content:"♙";
+  font-size:20px;
+}
+.job-search-mode-tabs{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:0 0 18px;
+}
+.job-search-mode-tabs button{
+  min-height:48px;
+  border:1px solid #d8e1ee;
+  border-radius:14px;
+  background:#fff;
+  font-weight:800;
+  color:#637084;
+}
+.job-search-mode-tabs button.active{
+  background:#0f4aa8;
+  color:#fff;
+  border-color:#0f4aa8;
+}
+.spot-only-filter[hidden],
+.long-only-filter[hidden]{
+  display:none!important;
+}
+.job-result-note{
+  color:#637084;
+  font-size:14px;
+}
+
 </style>
+  <link rel="stylesheet" href="./style.css?v=7.32.4-final-polish">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
-    <img src="./assets/icon-512.png" alt="WonderCraft">
+    <img src="./assets/header-logo.png" alt="WonderCraft">
     <h1>Wonder Craft</h1>
     <p>人材管理システム</p>
   </div>
 
   <header class="topbar">
-    <div class="brand">
-      <img src="./assets/icon-192.png" alt="WC">
-      <div>
-        <small>WonderCraft</small>
-        <div class="title-row"><strong>人材管理</strong><span id="appVersion" class="app-version">WC-7.29</span></div>
+    <div class="brand wc-brand" aria-label="WonderCraft 人材管理">
+      <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
+      <div class="wc-brand-copy">
+        <strong class="wc-brand-name">WonderCraft</strong>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.32.4</span></div>
       </div>
     </div>
-    <div class="top-actions"><span id="currentUserName" class="current-user" hidden></span><button id="logoutBtn" class="icon-btn logout-btn" type="button" aria-label="ログアウト" title="ログアウト" hidden>退出</button><button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button></div>
+    <div class="top-actions">
+      <button id="userMenuBtn" class="user-menu-trigger" type="button" hidden><span class="user-avatar">●</span><span id="currentUserName" class="current-user"></span><span>⌄</span></button>
+      <button id="reloadBtn" class="icon-btn" type="button" aria-label="再読み込み">↻</button>
+      <button id="menuBtn" class="icon-btn menu-trigger" type="button" aria-label="メニューを開く">☰</button>
+    </div>
+    <aside id="accountMenu" class="account-menu" hidden>
+      <header><div class="menu-avatar">●</div><div><strong id="menuUserName">WonderCraft</strong><small id="menuUserEmail"></small></div><button id="closeMenuBtn" type="button" aria-label="閉じる">×</button></header>
+      <nav>
+        <button type="button" data-view="home">⌂ <span>ホーム</span></button>
+        <button type="button" data-view="jobsearch">⌕ <span>案件検索（希望条件から探す）</span></button>
+        <button type="button" data-view="candidates">♙ <span>求職者</span></button>
+        <button type="button" data-view="progress">▣ <span>案件進捗</span></button>
+        <button type="button" data-view="matching">◎ <span>マッチング</span></button>
+        <div class="menu-divider"></div>
+        <div id="managementMenuGroup" class="management-menu-group">
+          <p>⚙ 管理メニュー</p>
+          <button type="button" data-view="management" data-management-target="skill">スキルシート申請</button>
+          <button type="button" data-view="management" data-management-target="partner">登録申請の承認</button>
+          <button id="menuUsersBtn" type="button" data-view="management" data-management-target="users">ユーザー管理</button>
+        </div>
+        <div class="menu-divider"></div>
+        <button id="menuLogoutBtn" class="menu-logout" type="button">↪ <span>ログアウト</span></button>
+      </nav>
+    </aside>
   </header>
 
   <main>
@@ -201,9 +308,9 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
           <div id="employeeRegisterMessage" class="message" aria-live="polite"></div>
         </div>
 
-        <button id="showPartnerRegisterBtn" class="text-btn" type="button">他企業の新規登録はこちら</button>
+        <button id="showPartnerRegisterBtn" class="text-btn" type="button">パートナー企業様の申請はこちら</button>
         <div id="partnerRegisterBox" class="partner-register-box" hidden>
-          <h3>他企業 新規登録申請</h3>
+          <h3>パートナー企業 登録申請</h3>
           <label>会社名<input id="regCompany" autocomplete="organization"></label>
           <label>担当者名<input id="regPerson" autocomplete="name"></label>
           <label>メールアドレス<input id="regEmail" type="email" autocomplete="email"></label>
@@ -223,27 +330,6 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     </section>
 
     <section id="appPanel" hidden>
-      
-      <section id="internalApprovalArea" class="approval-area" hidden>
-        <section class="approval-panel" id="employeeRequestsPanel" hidden>
-          <div class="approval-head"><div><p class="eyebrow">EMPLOYEE APPROVAL</p><h2>社員 登録申請</h2></div><button id="reloadEmployeeRequestsBtn" class="secondary" type="button">更新</button></div>
-          <div id="employeeRequestsList"></div>
-        </section>
-        <section class="approval-panel" id="userManagementPanel" hidden>
-          <div class="approval-head"><div><p class="eyebrow">USER MANAGEMENT</p><h2>ユーザー管理</h2></div><button id="reloadUsersBtn" class="secondary" type="button">更新</button></div>
-          <div id="usersList"></div>
-        </section>
-        <section class="approval-panel" id="partnerRequestsPanel" hidden>
-          <div class="approval-head"><div><p class="eyebrow">APPROVAL</p><h2>他企業 登録申請</h2></div><button id="reloadPartnerRequestsBtn" class="secondary" type="button">更新</button></div>
-          <div id="partnerRequestsList"></div>
-        </section>
-        <section class="approval-panel" id="skillRequestsPanel" hidden>
-          <div class="approval-head"><div><p class="eyebrow">SKILL SHEET</p><h2>スキルシート申請</h2></div><button id="reloadSkillRequestsBtn" class="secondary" type="button">更新</button></div>
-          <div id="skillRequestsList"></div>
-        </section>
-      </section>
-
-      
       <section id="partnerPortal" class="partner-portal" hidden>
         <section class="partner-hero">
           <div><p class="eyebrow">PARTNER PORTAL</p><h1>人材を探す</h1><p>候補者を確認し、必要なスキルシートを申請できます。</p></div>
@@ -269,26 +355,132 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <section class="matching-hero">
           <p class="eyebrow">SMART MATCHING</p>
           <h1>案件マッチング</h1>
-          <p>求職者→案件、案件→求職者の両方向からおすすめ順に確認できます。</p>
+          <p>求職者を選択し、条件に合う案件をおすすめ順に確認できます。</p>
         </section>
-
-        <div class="matching-mode-tabs">
-          <button id="matchModeCandidateBtn" class="active" type="button">求職者 → 案件</button>
-          <button id="matchModeJobBtn" type="button">案件 → 求職者</button>
-        </div>
-
         <section class="matching-controls">
-          <label id="matchingCandidateLabel">求職者
+          <label>求職者
             <select id="matchingCandidateSelect"><option value="">求職者を選択</option></select>
-          </label>
-          <label id="matchingJobLabel" hidden>案件
-            <input id="matchingJobSearch" type="search" placeholder="案件名・都道府県・会社で絞り込み">
-            <select id="matchingJobSelect"><option value="">案件を選択</option></select>
           </label>
           <button id="runMatchingBtn" class="primary" type="button">おすすめ案件を探す</button>
         </section>
         <div id="matchingSummary" class="matching-summary"></div>
         <section id="matchingResults" class="cards"></section>
+      </section>
+
+      <section id="jobSearchSection" class="job-search-section" hidden>
+        <section class="matching-hero job-search-hero">
+          <p class="eyebrow">JOB SEARCH</p>
+          <h1>案件検索</h1>
+          <p>希望条件を設定して、マッチング以外の案件を自由に検索できます。</p>
+        </section>
+        <div class="job-search-mode-tabs">
+          <button id="jobModeLongBtn" class="active" type="button">長期案件</button>
+          <button id="jobModeSpotBtn" type="button">スポット案件</button>
+        </div>
+        <div class="job-search-layout">
+          <aside class="job-filter-panel">
+            <div class="job-filter-title"><h2>希望条件</h2><button id="resetJobSearchBtn" class="secondary" type="button">条件をリセット</button></div>
+            <label>エリア
+              <select id="jobRegionFilter">
+                <option value="">すべて</option>
+                <option value="北海道">北海道</option>
+                <option value="東北">東北</option>
+                <option value="関東">関東</option>
+                <option value="甲信越">甲信越</option>
+                <option value="北陸">北陸</option>
+                <option value="東海">東海</option>
+                <option value="関西">関西</option>
+                <option value="中国">中国</option>
+                <option value="四国">四国</option>
+                <option value="九州">九州</option>
+                <option value="沖縄">沖縄</option>
+              </select>
+            </label>
+            <label>都道府県・全域
+              <select id="jobAreaFilter">
+                <option value="">エリアを選択してください</option>
+              </select>
+            </label>
+            <label>リモート案件
+              <select id="jobRemoteFilter">
+                <option value="exclude" selected>リモート含まない</option>
+                <option value="include">リモート含む</option>
+                <option value="only">リモートのみ</option>
+              </select>
+            </label>
+            <label>通勤時間 <strong id="jobDistanceValue">指定なし</strong>
+              <input id="jobDistanceRange" type="range" min="0" max="120" step="10" value="120">
+              
+            </label>
+            <label class="job-check-row">
+              <input id="jobTravelFilter" type="checkbox">
+              <span>出張あり案件も表示する</span>
+            </label>
+            <label>希望単価（日当） <strong id="jobPayValue">指定なし</strong>
+              <div class="dual-range">
+                <input id="jobPayMin" type="range" min="10000" max="50000" step="1000" value="10000">
+                <input id="jobPayMax" type="range" min="10000" max="50000" step="1000" value="50000">
+              </div>
+              
+            </label>
+            <div class="spot-only-filter" hidden>
+              <label>実施日・開始日（自）
+                <input id="jobSpotDateFrom" type="date">
+              </label>
+            </div>
+            <div class="spot-only-filter" hidden>
+              <label>実施日・開始日（至）
+                <input id="jobSpotDateTo" type="date">
+              </label>
+            </div>
+            <label>キャリア<select id="jobCareerFilter"><option value="">すべて</option><option>docomo</option><option>SB</option><option>au</option><option>楽天</option><option>その他</option></select></label>
+            <label>提案元会社<select id="jobCompanyFilter"><option value="">すべて</option></select></label>
+            <label>経験条件<select id="jobBeginnerFilter"><option value="">指定なし</option><option value="可">未経験可</option><option value="不可">経験者のみ</option></select></label>
+            <label>キーワード<input id="jobKeywordFilter" type="search" placeholder="案件名・店舗・備考など"></label>
+            <button id="runJobSearchBtn" class="primary" type="button">この条件で検索する</button>
+          </aside>
+          <section class="job-result-panel">
+            <div class="job-result-head"><div><h2>検索結果</h2><p id="jobResultModeNote" class="job-result-note">スポット案件は表示していません。</p></div><span id="jobResultCount" class="result-count">0件</span></div>
+            <div class="job-result-tools"><label>並び替え<select id="jobSort"><option value="new">更新日が新しい順</option><option value="payHigh">単価が高い順</option><option value="name">案件名順</option></select></label></div>
+            <div id="jobSearchResults" class="job-search-results"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="managementSection" class="management-section" hidden>
+        <section class="matching-hero"><p class="eyebrow">MANAGEMENT</p><h1>管理メニュー</h1><p id="managementDescription">各種申請とユーザーを管理できます。</p></section>
+
+      
+      <section id="internalApprovalArea" class="approval-area" hidden>
+        <section class="approval-panel" id="employeeRequestsPanel" hidden>
+          <div class="approval-head"><div><p class="eyebrow">EMPLOYEE APPROVAL</p><h2>社員 登録申請</h2></div><button id="reloadEmployeeRequestsBtn" class="secondary" type="button">更新</button></div>
+          <div id="employeeRequestsList"></div>
+        </section>
+        <section class="approval-panel" id="userManagementPanel" hidden>
+          <div class="approval-head"><div><p class="eyebrow">USER MANAGEMENT</p><h2>ユーザー管理</h2></div><button id="reloadUsersBtn" class="secondary" type="button">更新</button></div>
+          <div id="usersList"></div>
+        </section>
+        <section class="approval-panel" id="partnerRequestsPanel" hidden>
+          <div class="approval-head"><div><p class="eyebrow">APPROVAL</p><h2>パートナー企業 登録申請</h2></div><button id="reloadPartnerRequestsBtn" class="secondary" type="button">更新</button></div>
+          <div id="partnerRequestsList"></div>
+        </section>
+        <section class="approval-panel" id="skillRequestsPanel" hidden>
+          <div class="approval-head"><div><p class="eyebrow">SKILL SHEET</p><h2>スキルシート申請</h2></div><button id="reloadSkillRequestsBtn" class="secondary" type="button">更新</button></div>
+          <div id="skillRequestsList"></div>
+        </section>
+      </section>
+
+      
+            </section>
+
+      <section id="homeVisualSection" class="home-visual-section home-notice-only">
+        <article class="notice-card">
+          <header><h2>お知らせ</h2></header>
+          <div class="notice-list">
+            <p><time>2026/07/27</time> WC-7.32.4 案件検索条件を調整しました。</p>
+            <p><time>2026/07/26</time> 社員登録・管理者承認に対応しました。</p>
+          </div>
+        </article>
       </section>
 
       <section id="dashboardSection" class="home-dashboard" aria-label="全体件数">
@@ -359,23 +551,14 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     </section>
   </div>
 
-  <nav class="bottom-nav" aria-label="メインメニュー">
-    <button class="active" type="button" data-view="home" aria-label="ホーム">
-      <span class="nav-icon">⌂</span><span>ホーム</span>
-    </button>
-    <button type="button" data-view="candidates" aria-label="求職者">
-      <span class="nav-icon">♙</span><span>求職者</span>
-    </button>
-    <button type="button" data-view="progress" aria-label="案件進捗">
-      <span class="nav-icon">▣</span><span>案件進捗</span>
-    </button>
-    <button type="button" data-view="matching" aria-label="マッチング">
-      <span class="nav-icon">◎</span><span>マッチング</span>
-    </button>
+  <nav class="bottom-nav six-nav" aria-label="メインメニュー">
+    <button class="active" type="button" data-view="home"><span class="nav-icon">⌂</span><span>ホーム</span></button>
+    <button type="button" data-view="candidates"><span class="nav-icon">♙</span><span>求職者</span></button>
+    <button type="button" data-view="progress"><span class="nav-icon">▣</span><span>案件進捗</span></button>
+    <button type="button" data-view="jobsearch"><span class="nav-icon">⌕</span><span>案件検索</span></button>
+    <button type="button" data-view="matching"><span class="nav-icon">◎</span><span>マッチング</span></button>
+    <button type="button" data-view="management"><span class="nav-icon">⚙</span><span>管理</span></button>
   </nav>
-
-  <script src="./config.js?v=7.29.0-auth"></script>
-  <script src="./app.js?v=7.29.0-auth"></script>
 
   <div id="wcLoadingOverlay" class="wc-loading-overlay" aria-live="polite" aria-busy="true">
     <div class="wc-loading-box">
@@ -385,6 +568,42 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <div id="wcLoadingText" class="wc-loading-text">読み込み中…</div>
     </div>
   </div>
+
+  <script>
+    /*
+     * 外部JSが読み込めない場合でも、ローダーを永久表示させない。
+     * 8秒後に必ず解除し、ログイン画面または接続画面を表示する。
+     */
+    window.__wcLoaderFailSafe = window.setTimeout(function(){
+      var overlay = document.getElementById("wcLoadingOverlay");
+      if(overlay){
+        overlay.hidden = true;
+        overlay.setAttribute("aria-busy","false");
+        overlay.style.display = "none";
+      }
+
+      var app = document.getElementById("appPanel");
+      var login = document.getElementById("loginPanel");
+      var system = document.getElementById("systemPanel");
+      var visible =
+        (app && !app.hidden) ||
+        (login && !login.hidden) ||
+        (system && !system.hidden);
+
+      if(!visible && login){
+        login.hidden = false;
+        var message = document.getElementById("loginMessage");
+        if(message){
+          message.textContent =
+            "読み込みに失敗しました。右上の更新を押すか、もう一度ログインしてください。";
+          message.className = "message error";
+        }
+      }
+    }, 8000);
+  </script>
+
+  <script src="./config.js?v=7.32.4-final-polish"></script>
+  <script src="./app.js?v=7.32.4-final-polish"></script>
 
 </body>
 </html>

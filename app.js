@@ -1,22 +1,104 @@
-/* WonderCraft PWA WC-7.29 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.32.4 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
 let loadRequestId=0;
 
-window.addEventListener("load",async()=>{
-  wcLoadingDepth = 1;
-  wcLoadingShownAt = Date.now();
-  setTimeout(()=>{$("splash")?.classList.add("hide");setTimeout(()=>$('splash')?.remove(),450)},900);
-  registerWonderCraftServiceWorker_();
-  bindEvents();
-  if($("appVersion")) $("appVersion").textContent=config.VERSION||"WC-7.29";
-  updateWcLoadingText_("読み込み中…");
+const WC_API_TIMEOUT_MS = 15000;
+const WC_STARTUP_VISIBLE_TIMEOUT_MS = 9000;
+
+async function wcFetchWithTimeout_(url, options={}){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), WC_API_TIMEOUT_MS);
+
   try{
-    await initialize();
+    return await fetch(url,{
+      ...options,
+      signal:controller.signal
+    });
+  }catch(error){
+    if(error?.name==="AbortError"){
+      const timeoutError=new Error("通信がタイムアウトしました。");
+      timeoutError.code="NETWORK_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
   }finally{
+    clearTimeout(timer);
+  }
+}
+
+function forceHideWcLoader_(){
+  wcLoadingDepth=0;
+  const overlay=$("wcLoadingOverlay");
+  if(overlay){
+    overlay.hidden=true;
+    overlay.classList.remove("show");
+    overlay.setAttribute("aria-hidden","true");
+    overlay.setAttribute("aria-busy","false");
+    overlay.style.display="none";
+  }
+  document.body.classList.remove("wc-loading-active");
+}
+
+function isAnyMainScreenVisible_(){
+  return [
+    $("appPanel"),
+    $("loginPanel"),
+    $("systemPanel")
+  ].some(el=>el && !el.hidden);
+}
+
+
+window.addEventListener("load",async()=>{
+  wcLoadingDepth=1;
+  wcLoadingShownAt=Date.now();
+
+  setTimeout(()=>{
+    $("splash")?.classList.add("hide");
+    setTimeout(()=>$("splash")?.remove(),450);
+  },900);
+
+  updateWcLoadingText_("読み込み中…");
+
+  const watchdog=setTimeout(()=>{
+    console.warn("WonderCraft startup watchdog fired");
+    forceHideWcLoader_();
+
+    if(!isAnyMainScreenVisible_()){
+      try{
+        showLogin("読み込みに時間がかかっています。もう一度ログインするか、右上の更新を押してください。");
+      }catch(_error){}
+    }
+  },WC_STARTUP_VISIBLE_TIMEOUT_MS);
+
+  try{
+    registerWonderCraftServiceWorker_();
+    bindEvents();
+
+    if($("appVersion")){
+      $("appVersion").textContent=config.VERSION||"WC-7.32.4";
+    }
+
+    await initialize();
+  }catch(error){
+    console.error("WonderCraft startup error:",error);
+
+    try{
+      const detail=error?.message ? `（${error.message}）` : "";
+      showLogin(`起動処理を再読み込みしてください。${detail}`);
+    }catch(fallbackError){
+      console.error("WonderCraft startup fallback error:",fallbackError);
+    }
+  }finally{
+    clearTimeout(watchdog);
+    if(window.__wcLoaderFailSafe){
+      clearTimeout(window.__wcLoaderFailSafe);
+      window.__wcLoaderFailSafe = null;
+    }
     await hideWcLoading_(true);
+    forceHideWcLoader_();
   }
 });
 
@@ -67,7 +149,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js",
+      "./service-worker.js?v=7.31.7-loader-css-fix",
       { updateViaCache:"none" }
     );
 
@@ -94,7 +176,7 @@ async function registerWonderCraftServiceWorker_(){
     navigator.serviceWorker.addEventListener("controllerchange",()=>{
       if(wcSwRefreshing) return;
       wcSwRefreshing = true;
-      window.location.reload();
+      sessionStorage.setItem("wc_sw_updated","1");
     });
   }catch(err){
     console.error("service worker update failed", err);
@@ -118,6 +200,7 @@ function showWcLoading_(message){
   if(text) text.textContent = message || "読み込み中…";
 
   if(overlay){
+    overlay.style.removeProperty("display");
     overlay.hidden = false;
     overlay.setAttribute("aria-busy","true");
   }
@@ -175,24 +258,38 @@ function wcViewCacheClear_(){
 }
 
 function bindEvents(){
-  $("systemRetryBtn").onclick=async()=>{showWcLoading_("再接続中…");try{await initialize(true)}finally{await hideWcLoading_(true)}};
-  $("loginForm").onsubmit=handleLogin;
-  $("logoutBtn").onclick=logout;
-  $("forgotPasswordBtn").onclick=()=>showLoginMessage("パスワード再発行申請は次の段階で追加します。現在は自社担当者へご連絡ください。",false);
-  $("reloadBtn").onclick=handleManualReload;
+  $("systemRetryBtn")?.addEventListener("click",async()=>{showWcLoading_("再接続中…");try{await initialize(true)}finally{await hideWcLoading_(true)}});
+  $("loginForm")?.addEventListener("submit",handleLogin);
+  $("logoutBtn")?.addEventListener("click",logout);
+  $("forgotPasswordBtn")?.addEventListener("click",()=>showLoginMessage("パスワード再発行申請は次の段階で追加します。現在は自社担当者へご連絡ください。",false));
+  $("reloadBtn")?.addEventListener("click",handleManualReload);
+  $("menuBtn")?.addEventListener("click",openAccountMenu_);
+  $("userMenuBtn")?.addEventListener("click",openAccountMenu_);
+  $("closeMenuBtn")?.addEventListener("click",closeAccountMenu_);
+  $("menuLogoutBtn")?.addEventListener("click",()=>{closeAccountMenu_();logout();});
+  document.addEventListener("click",event=>{const menu=$("accountMenu");if(!menu||menu.hidden)return;if(menu.contains(event.target)||$("menuBtn")?.contains(event.target)||$("userMenuBtn")?.contains(event.target))return;closeAccountMenu_();});
   $("searchInput").addEventListener("input",()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(loadCurrent,350)});
-  $("staffFilter").onchange=loadCurrent;
-  $("regionFilter").onchange=loadCurrent;
-  $("experienceFilter").onchange=loadCurrent;
-  $("careerFilter").onchange=loadCurrent;
-  document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+  $("staffFilter")?.addEventListener("change",loadCurrent);
+  $("regionFilter")?.addEventListener("change",loadCurrent);
+  $("experienceFilter")?.addEventListener("change",loadCurrent);
+  $("careerFilter")?.addEventListener("change",loadCurrent);
+  document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{closeAccountMenu_();switchView(b.dataset.view);});
   document.querySelectorAll("[data-close]").forEach(b=>b.onclick=closeModal);
-  $("editForm").onsubmit=saveEdit;
-  $("openSkillSheetBtn").onclick=openSkillSheet;
+  $("editForm")?.addEventListener("submit",saveEdit);
+  $("openSkillSheetBtn")?.addEventListener("click",openSkillSheet);
   $("runMatchingBtn")?.addEventListener("click",runCandidateMatching);
-  $("matchModeCandidateBtn")?.addEventListener("click",()=>setMatchingMode("candidate"));
-  $("matchModeJobBtn")?.addEventListener("click",()=>setMatchingMode("job"));
-  $("matchingJobSearch")?.addEventListener("input",e=>renderMatchingJobOptions(e.target.value));
+  $("runJobSearchBtn")?.addEventListener("click",renderJobSearchResults);
+  $("resetJobSearchBtn")?.addEventListener("click",resetJobSearch);
+  ["jobDistanceRange","jobPayMin","jobPayMax"].forEach(id=>$(id)?.addEventListener("input",updateJobRangeLabels));
+  $("jobModeLongBtn")?.addEventListener("click",()=>setJobSearchMode_("long"));
+  $("jobModeSpotBtn")?.addEventListener("click",()=>setJobSearchMode_("spot"));
+  $("jobRegionFilter")?.addEventListener("change",()=>{updateJobPrefectureOptions();renderJobSearchResults();});
+  $("jobAreaFilter")?.addEventListener("change",renderJobSearchResults);
+  $("jobTravelFilter")?.addEventListener("change",renderJobSearchResults);
+  $("jobRemoteFilter")?.addEventListener("change",renderJobSearchResults);
+  $("jobSpotDateFrom")?.addEventListener("change",renderJobSearchResults);
+  $("jobSpotDateTo")?.addEventListener("change",renderJobSearchResults);
+  $("jobSort")?.addEventListener("change",renderJobSearchResults);
   $("showEmployeeRegisterBtn")?.addEventListener("click",()=>{const box=$("employeeRegisterBox");if(box)box.hidden=!box.hidden;});
   $("employeeRegisterBtn")?.addEventListener("click",submitEmployeeRegistration);
   $("showPartnerRegisterBtn")?.addEventListener("click",()=>{const box=$("partnerRegisterBox");if(box)box.hidden=!box.hidden;});
@@ -207,6 +304,16 @@ function bindEvents(){
   $("partnerSearchInput")?.addEventListener("input",()=>{clearTimeout(partnerSearchTimer);partnerSearchTimer=setTimeout(reloadPartnerPortal,350);});
 }
 
+
+function openAccountMenu_(){
+  const menu=$("accountMenu");
+  if(!menu||!state.user)return;
+  $("menuUserName").textContent=state.user.name||"WonderCraft";
+  $("menuUserEmail").textContent=state.user.email||"";
+  $("menuUsersBtn").hidden=state.user.role!=="admin";
+  menu.hidden=false;
+}
+function closeAccountMenu_(){const menu=$("accountMenu");if(menu)menu.hidden=true;}
 
 const WC_BOOT_CACHE_KEY="wc_boot_cache_v1";
 const WC_BOOT_CACHE_TTL=6*60*60*1000;
@@ -299,7 +406,7 @@ async function logout(){
   try{if(getToken())await apiPost("logout",{})}catch(_e){}
   clearToken();state.user=null;updateUserUi();$("appPanel").hidden=true;showLogin("ログアウトしました。");
 }
-function showLogin(message=""){$("systemPanel").hidden=true;$("appPanel").hidden=true;$("loginPanel").hidden=false;$("logoutBtn").hidden=true;$("currentUserName").hidden=true;if(message)showLoginMessage(message,false);setTimeout(()=>$("loginEmail")?.focus(),50)}
+function showLogin(message=""){$("systemPanel").hidden=true;$("appPanel").hidden=true;$("loginPanel").hidden=false;if($("logoutBtn"))$("logoutBtn").hidden=true;if($("userMenuBtn"))$("userMenuBtn").hidden=true;if($("currentUserName"))$("currentUserName").hidden=true;if(message)showLoginMessage(message,false);setTimeout(()=>$("loginEmail")?.focus(),50)}
 function hideLogin(){$("loginPanel").hidden=true}
 function showLoginMessage(message,isError){const el=$("loginMessage");el.textContent=message||"";el.className=`message${message?(isError?" error":" success"):""}`}
 
@@ -308,6 +415,7 @@ function applyRoleUi(){
   document.body.dataset.role=role;
   const internal=["admin","staff"].includes(role);
   if($("internalApprovalArea")) $("internalApprovalArea").hidden=!internal;
+  if($("managementMenuGroup")) $("managementMenuGroup").hidden=!internal;
   if($("employeeRequestsPanel")) $("employeeRequestsPanel").hidden=role!=="admin";
   if($("userManagementPanel")) $("userManagementPanel").hidden=role!=="admin";
   document.querySelector(".bottom-nav")?.toggleAttribute("hidden", role==="partner");
@@ -325,7 +433,7 @@ function applyRoleUi(){
   }
 }
 
-function updateUserUi(){const logged=!!state.user;$("logoutBtn").hidden=!logged;$("currentUserName").hidden=!logged;$("currentUserName").textContent=logged?`${state.user.name||state.user.email}（${roleLabel(state.user.role)}）`:""}
+function updateUserUi(){const logged=!!state.user;if($("logoutBtn"))$("logoutBtn").hidden=true;if($("userMenuBtn"))$("userMenuBtn").hidden=!logged;if($("currentUserName")){$("currentUserName").hidden=!logged;$("currentUserName").textContent=logged?`${state.user.name||state.user.email}（${roleLabel(state.user.role)}）`:""}if(logged){if($("menuUserName"))$("menuUserName").textContent=state.user.name||state.user.email;if($("menuUserEmail"))$("menuUserEmail").textContent=state.user.email||"";}}
 function roleLabel(role){return role==="admin"?"管理者":role==="staff"?"自社社員":"他企業"}
 function isAuthError(error){return ["AUTH_REQUIRED","SESSION_INVALID","SESSION_EXPIRED","USER_DISABLED","ROLE_DENIED"].includes(error.code)}
 
@@ -336,7 +444,7 @@ function saveToken(token){localStorage.setItem("wc_session_token",token)}
 function clearToken(){localStorage.removeItem("wc_session_token")}
 
 async function publicPost(action,payload){
-  const response=await fetch(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,payload})});
+  const response=await wcFetchWithTimeout_(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,payload})});
   const json=await response.json();if(!json.success){const error=new Error(json.error||"処理に失敗しました。");error.code=json.code||"API_ERROR";throw error}return json.data;
 }
 
@@ -355,14 +463,14 @@ function showMaintenance(message){hideLogin();$("appPanel").hidden=true;$("syste
 async function apiGet(action,params={},api=getApi(),token=getToken()){
   const url=new URL(api);url.searchParams.set("api","1");url.searchParams.set("action",action);url.searchParams.set("token",token);
   Object.entries(params).forEach(([key,value])=>{if(value!==undefined&&value!==null&&String(value)!=="")url.searchParams.set(key,value)});
-  const response=await fetch(url.toString(),{redirect:"follow",cache:"no-store"});
+  const response=await wcFetchWithTimeout_(url.toString(),{redirect:"follow",cache:"no-store"});
   const json=await response.json();
   if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
   return json.data;
 }
 
 async function apiPost(action,payload){
-  const response=await fetch(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,token:getToken(),payload})});
+  const response=await wcFetchWithTimeout_(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,token:getToken(),payload})});
   const json=await response.json();
   if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
   return json.data;
@@ -374,7 +482,7 @@ async function loadDashboard(){try{renderDashboard(await apiGet("dashboard"))}ca
 function renderDashboard(d){$("countCandidates").textContent=d.candidates??"-";$("countProgress").textContent=d.progress??"-";$("countToday").textContent=d.todayInterviews??"-";$("countWaiting").textContent=d.waitingCandidates??"-"}
 
 function switchView(view){
-  if(!["home","candidates","progress","matching"].includes(view))view="home";
+  if(!["home","candidates","progress","jobsearch","matching","management"].includes(view))view="home";
   state.view=view;
   applyViewState();
   loadCurrent();
@@ -382,29 +490,15 @@ function switchView(view){
 
 function applyViewState(){
   document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===state.view));
-  const isHome=state.view==="home";
-  const isMatching=state.view==="matching";
-  $("dashboardSection").hidden=!isHome;
-  $("homeHeader").hidden=!isHome;
-  $("matchingSection").hidden=!isMatching;
-  $("listHeader").hidden=isHome||isMatching;
-  $("filterSection").hidden=isHome||isMatching;
-
-  if(state.view==="candidates"){
-    $("viewTitle").textContent="求職者";
-    $("viewDescription").textContent="求職者を検索・編集できます。";
-    $("searchInput").placeholder="名前・駅・会社・進捗を検索";
-    $("regionFilter").disabled=false;
-    $("experienceFilter").hidden=false;
-    $("careerFilter").hidden=false;
-  }else if(state.view==="progress"){
-    $("viewTitle").textContent="案件進捗";
-    $("viewDescription").textContent="案件状況を検索・編集できます。";
-    $("searchInput").placeholder="氏名・会社・案件進捗を検索";
-    $("regionFilter").disabled=true;
-    $("experienceFilter").hidden=true;
-    $("careerFilter").hidden=true;
-  }
+  const isHome=state.view==="home", isMatching=state.view==="matching", isJobSearch=state.view==="jobsearch", isManagement=state.view==="management";
+  $("homeVisualSection").hidden=!isHome; $("dashboardSection").hidden=!isHome; $("homeHeader").hidden=!isHome; $("matchingSection").hidden=!isMatching;
+  $("jobSearchSection").hidden=!isJobSearch; $("managementSection").hidden=!isManagement;
+  $("listHeader").hidden=isHome||isMatching||isJobSearch||isManagement;
+  $("filterSection").hidden=isHome||isMatching||isJobSearch||isManagement;
+  $("cards").hidden=isMatching||isJobSearch||isManagement;
+  if(state.view==="candidates"){$("viewTitle").textContent="求職者";$("viewDescription").textContent="求職者を検索・編集できます。";$("searchInput").placeholder="名前・駅・会社・進捗を検索";$("regionFilter").disabled=false;$("experienceFilter").hidden=false;$("careerFilter").hidden=false;}
+  else if(state.view==="progress"){$("viewTitle").textContent="案件進捗";$("viewDescription").textContent="案件状況を検索・編集できます。";$("searchInput").placeholder="氏名・会社・案件進捗を検索";$("regionFilter").disabled=true;$("experienceFilter").hidden=true;$("careerFilter").hidden=true;}
+  if(isManagement){const admin=state.user?.role==="admin";$("employeeRequestsPanel").hidden=!admin;$("userManagementPanel").hidden=!admin;$("partnerRequestsPanel").hidden=false;$("skillRequestsPanel").hidden=false;$("managementDescription").textContent=admin?"社員登録・ユーザー・パートナー企業・スキルシート申請を管理できます。":"パートナー企業とスキルシートの申請を承認できます。";}
 }
 
 async function loadCurrent(){
@@ -416,13 +510,22 @@ async function loadCurrent(){
     staff: $("staffFilter").value
   };
 
+  if(state.view==="jobsearch"){
+    await loadJobSearchOnce();
+    return;
+  }
+  if(state.view==="management"){
+    showWcLoading_("読み込み中…");
+    try{const tasks=[loadPartnerRequests(),loadSkillSheetRequests()];if(state.user?.role==="admin")tasks.push(loadEmployeeRequests(),loadUsers());await Promise.all(tasks);}finally{await hideWcLoading_();}
+    return;
+  }
+
   if(state.view==="matching"){
     showWcLoading_("読み込み中…");
     try{
       setStatus("");
       $("cards").innerHTML="";
-      if(matchingMode==="candidate") await loadMatchingCandidatesOnce();
-      else await loadMatchingJobsOnce();
+      await loadMatchingCandidatesOnce();
     }finally{
       await hideWcLoading_();
     }
@@ -496,7 +599,14 @@ function renderProgress(items){
   $("cards").innerHTML=items.map((x,i)=>`<article class="card clickable" onclick="openProgress(${i})"><h3>${esc(x.name||"名前未入力")}</h3><span class="badge">${esc(x.status||"進捗未設定")}</span><div class="details">${rows([["人員担当者",x.staff],["所属会社",x.company],["案件担当者",x.projectStaff],["上位会社",x.upperCompany],["エリア",x.area],["エントリー月",x.entryMonth]])}</div>${x.remarks?`<div class="remarks">${esc(x.remarks)}</div>`:""}<div class="hint">タップして編集</div></article>`).join("");
 }
 
-function renderToday(items){
+function renderHomeTodayPreview_(items){
+  const box=$("homeTodayPreview");if(!box)return;
+  const list=(items||[]).slice(0,2);
+  if(!list.length){box.innerHTML='<p class="muted-preview">本日の面談予定はありません。</p>';return;}
+  box.innerHTML=list.map(x=>`<div class="home-today-row"><time>${esc(x.time||x.interviewTime||"時間未定")}</time><div><strong>${esc(x.name||x.candidateName||"面談")}</strong><small>${esc(x.company||x.projectCompany||x.shopName||"")}</small></div></div>`).join('');
+}
+
+function renderToday(items){renderHomeTodayPreview_(items);
   const sorted=[...(items||[])].sort((a,b)=>String(a.interviewTime||"99:99").localeCompare(String(b.interviewTime||"99:99"),"ja"));
   setStatus(`${sorted.length}件`);
   if(!sorted.length)return showEmpty("本日の面談はありません。");
@@ -885,6 +995,329 @@ async function rejectSkillRequest(requestId){
 }
 
 
+
+let jobSearchLoaded=false;
+let jobSearchItems=[];
+function normalizeJobText(v){return String(v||"").normalize("NFKC").toLowerCase();}
+function extractJobPay(v){const nums=(String(v||"").replace(/,/g,"").match(/\d{3,6}/g)||[]).map(Number);if(!nums.length)return 0;let n=Math.max(...nums);if(n>100000)n=Math.round(n/20/8);else if(n>10000)n=Math.round(n/8);return n;}
+function inferCareer(x){const t=normalizeJobText([x.shopName,x.originalText,x.sourceCompany].join(" "));if(/docomo|ドコモ/.test(t))return "docomo";if(/softbank|ソフトバンク|\bsb\b/.test(t))return "SB";if(/\bau\b|エーユー/.test(t))return "au";if(/楽天|rakuten/.test(t))return "楽天";return "その他";}
+async function loadJobSearchOnce(){if(jobSearchLoaded){renderJobSearchResults();return;}showWcLoading_("案件を読み込み中…");try{jobSearchItems=await apiGet("matchingJobs")||[];jobSearchLoaded=true;fillJobSearchFilters();updateJobRangeLabels();renderJobSearchResults();}catch(e){$("jobSearchResults").innerHTML=`<div class="error">${esc(e.message||"案件を取得できませんでした。")}</div>`;}finally{await hideWcLoading_();}}
+const WC_JOB_REGION_MAP={"北海道": ["北海道"], "東北": ["青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"], "関東": ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県"], "甲信越": ["新潟県", "山梨県", "長野県"], "北陸": ["富山県", "石川県", "福井県"], "東海": ["岐阜県", "静岡県", "愛知県", "三重県"], "関西": ["滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"], "中国": ["鳥取県", "島根県", "岡山県", "広島県", "山口県"], "四国": ["徳島県", "香川県", "愛媛県", "高知県"], "九州": ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県"], "沖縄": ["沖縄県"]};
+
+function updateJobPrefectureOptions(){
+  const region=$("jobRegionFilter")?.value||"";
+  const select=$("jobAreaFilter");
+  if(!select)return;
+
+  if(!region){
+    select.innerHTML='<option value="">エリアを選択してください</option>';
+    select.disabled=true;
+    return;
+  }
+
+  const prefectures=WC_JOB_REGION_MAP[region]||[];
+  select.disabled=false;
+  select.innerHTML=
+    `<option value="${region}">${region}全域</option>`+
+    prefectures.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");
+}
+
+function fillJobSearchFilters(){
+  const companies=[...new Set(jobSearchItems.map(x=>String(x.sourceCompany||"").trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,"ja"));
+
+  updateJobPrefectureOptions();
+  $("jobCompanyFilter").innerHTML='<option value="">すべて</option>'+
+    companies.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+}
+function updateJobRangeLabels(){
+  const d=Number($("jobDistanceRange").value);
+  $("jobDistanceValue").textContent=d>=120?"指定なし":`${d}分以内`;
+
+  let lo=Number($("jobPayMin").value);
+  let hi=Number($("jobPayMax").value);
+
+  if(lo>hi){
+    [$("jobPayMin").value,$("jobPayMax").value]=[hi,lo];
+    lo=Number($("jobPayMin").value);
+    hi=Number($("jobPayMax").value);
+  }
+
+  $("jobPayValue").textContent=
+    lo===10000&&hi===50000
+      ?"指定なし"
+      :`${lo.toLocaleString()}円 ～ ${hi.toLocaleString()}円`;
+}
+function resetJobSearch(){
+  ["jobRegionFilter","jobCompanyFilter","jobCareerFilter","jobBeginnerFilter"].forEach(id=>{
+    if($(id))$(id).value="";
+  });
+
+  $("jobKeywordFilter").value="";
+  $("jobDistanceRange").value=120;
+  $("jobPayMin").value=10000;
+  $("jobPayMax").value=50000;
+  if($("jobTravelFilter"))$("jobTravelFilter").checked=false;
+  if($("jobRemoteFilter"))$("jobRemoteFilter").value="exclude";
+  if($("jobSpotDateFrom"))$("jobSpotDateFrom").value="";
+  if($("jobSpotDateTo"))$("jobSpotDateTo").value="";
+  setJobSearchMode_("long");
+
+  updateJobPrefectureOptions();
+  updateJobRangeLabels();
+  renderJobSearchResults();
+}
+function getJobCommuteMinutes_(x){
+  const direct=[
+    x.commuteMinutes,x.travelMinutes,x.accessMinutes,x.routeMinutes,
+    x.commuteTime,x.travelTime,x.accessTime
+  ];
+
+  for(const value of direct){
+    const n=Number(String(value==null?"":value).replace(/[^\d.]/g,""));
+    if(Number.isFinite(n)&&n>=0)return n;
+  }
+
+  const text=[x.access,x.station,x.originalText,x.remarks].join(" ");
+  const m=text.match(/(?:徒歩|通勤|所要|アクセス)[^\d]{0,8}(\d{1,3})\s*分/);
+  return m?Number(m[1]):null;
+}
+
+function isTravelJob_(x){
+  const text=normalizeJobText([
+    x.shopName,x.area,x.prefecture,x.originalText,x.remarks,x.workStyle
+  ].join(" "));
+  return /出張|全国対応|全国案件|遠方対応|宿泊/.test(text);
+}
+
+function getJobRegion_(x){
+  const pref=String(x.prefecture||"").trim();
+  for(const [region,prefs] of Object.entries(WC_JOB_REGION_MAP)){
+    if(prefs.includes(pref))return region;
+  }
+  const area=String(x.area||"").trim();
+  return WC_JOB_REGION_MAP[area]?area:"";
+}
+
+function renderJobSearchResults(){
+  if(!jobSearchLoaded)return;
+
+  const region=$("jobRegionFilter")?.value||"";
+  const area=$("jobAreaFilter")?.value||"";
+  const company=$("jobCompanyFilter")?.value||"";
+  const career=$("jobCareerFilter")?.value||"";
+  const beginner=$("jobBeginnerFilter")?.value||"";
+  const q=normalizeJobText($("jobKeywordFilter")?.value||"");
+  const min=Number($("jobPayMin")?.value||10000);
+  const max=Number($("jobPayMax")?.value||50000);
+  const maxMinutes=Number($("jobDistanceRange")?.value||120);
+  const includeTravel=$("jobTravelFilter")?.checked===true;
+  const remoteMode=$("jobRemoteFilter")?.value||"exclude";
+  const dateFrom=$("jobSpotDateFrom")?.value||"";
+  const dateTo=$("jobSpotDateTo")?.value||"";
+
+  let items=jobSearchItems.filter(x=>{
+    const text=normalizeJobText([x.shopName,x.prefecture,x.area,x.sourceCompany,x.price,x.originalText,x.beginnerAvailability,x.remarks].join(" "));
+    const pay=extractJobPay(x.price);
+    const commute=getJobCommuteMinutes_(x);
+    const jobRegion=getJobRegion_(x);
+    const travel=isTravelJob_(x);
+    const spot=isSpotJob_(x);
+    const remote=isRemoteJob_(x);
+    const jobDate=getJobDate_(x);
+
+    const modeOk=jobSearchMode==="spot"?spot:!spot;
+    const remoteOk=remoteMode==="include"||(remoteMode==="only"?remote:!remote);
+    const spotDateOk=jobSearchMode!=="spot"||((!dateFrom||!jobDate||jobDate>=dateFrom)&&(!dateTo||!jobDate||jobDate<=dateTo));
+    const regionOk=!region||jobRegion===region;
+    const areaOk=!area||(area===region?jobRegion===region:String(x.prefecture||"").trim()===area);
+    const travelOk=includeTravel||!travel;
+    const commuteOk=maxMinutes>=120||commute===null||commute<=maxMinutes;
+    const payOk=!pay||(pay>=min&&pay<=max);
+
+    return modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&commuteOk&&payOk&&
+      (!company||x.sourceCompany===company)&&
+      (!career||inferCareer(x)===career)&&
+      (!beginner||normalizeJobText(x.beginnerAvailability).includes(normalizeJobText(beginner)))&&
+      (!q||text.includes(q));
+  });
+
+  const sort=$("jobSort")?.value||"new";
+  if(sort==="payHigh")items.sort((a,b)=>extractJobPay(b.price)-extractJobPay(a.price));
+  else if(sort==="name")items.sort((a,b)=>String(a.shopName||"").localeCompare(String(b.shopName||""),"ja"));
+
+  $("jobResultCount").textContent=`${items.length}件`;
+  const box=$("jobSearchResults");
+  if(!items.length){box.innerHTML='<div class="empty job-empty">条件に合う案件がありません。</div>';return;}
+
+  box.innerHTML=items.slice(0,20).map(x=>{
+    const commute=getJobCommuteMinutes_(x);
+    const spot=isSpotJob_(x);
+    const remote=isRemoteJob_(x);
+    const travel=isTravelJob_(x);
+    const date=getJobDate_(x);
+    return `<article class="job-result-card">
+      <div class="job-card-main">
+        <div class="job-card-title-row">
+          <span class="job-kind-badge ${spot?'spot':'long'}">${spot?'スポット':'長期案件'}</span>
+          <h3>${esc(x.shopName||"案件名未設定")}</h3>
+        </div>
+        <div class="job-card-meta">
+          <span>📍 ${esc(x.prefecture||x.area||"勤務地要確認")}</span>
+          ${date?`<span>📅 ${esc(date)}</span>`:""}
+          ${commute!==null?`<span>🚃 約${commute}分</span>`:""}
+          <span>💴 ${esc(x.price||"単価要確認")}</span>
+        </div>
+        <div class="job-card-sub">
+          <span>🏢 ${esc(x.sourceCompany||"案件元要確認")}</span>
+          <span class="job-mini-tag">${esc(inferCareer(x))}</span>
+          ${remote?'<span class="job-mini-tag">リモート</span>':""}
+          ${travel?'<span class="job-mini-tag">出張あり</span>':""}
+          ${x.beginnerAvailability?`<span class="job-mini-tag">未経験:${esc(x.beginnerAvailability)}</span>`:""}
+        </div>
+      </div>
+      <details class="job-card-details"><summary>詳細を見る</summary><div class="remarks">${esc(x.originalText||x.remarks||"詳細情報はありません。")}</div></details>
+    </article>`;
+  }).join("");
+}
+
+let jobSearchMode="long";
+
+function setJobSearchMode_(mode){
+  jobSearchMode=mode==="spot"?"spot":"long";
+
+  $("jobModeLongBtn")?.classList.toggle("active",jobSearchMode==="long");
+  $("jobModeSpotBtn")?.classList.toggle("active",jobSearchMode==="spot");
+
+  document.querySelectorAll(".spot-only-filter").forEach(el=>{
+    el.hidden=jobSearchMode!=="spot";
+  });
+
+  const note=$("jobResultModeNote");
+  if(note){
+    note.textContent=jobSearchMode==="long"
+      ?"スポット案件は表示していません。"
+      :"スポット案件のみ表示しています。";
+  }
+
+  renderJobSearchResults();
+}
+
+function normalizeSpotDate_(value){
+  if(!value)return "";
+
+  const text=String(value).trim();
+
+  const full=text.match(
+    /(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/
+  );
+  if(full){
+    return `${full[1]}-${String(full[2]).padStart(2,"0")}-${String(full[3]).padStart(2,"0")}`;
+  }
+
+  const monthDay=text.match(
+    /(?:^|\D)(\d{1,2})[\/\-.月](\d{1,2})(?:日|\D|$)/
+  );
+  if(monthDay){
+    const year=new Date().getFullYear();
+    return `${year}-${String(monthDay[1]).padStart(2,"0")}-${String(monthDay[2]).padStart(2,"0")}`;
+  }
+
+  return "";
+}
+
+function getJobDate_(job){
+  for(const value of [
+    job.workDate,
+    job.startDate,
+    job.date,
+    job.eventDate,
+    job.updatedAt,
+    job.updateDate
+  ]){
+    const date=normalizeSpotDate_(value);
+    if(date)return date;
+  }
+
+  return normalizeSpotDate_(
+    [job.originalText,job.remarks,job.shopName].join(" ")
+  );
+}
+
+function isSpotJob_(job){
+  if(job.isSpot===true||job.spot===true)return true;
+
+  const explicitWorkDateFields=[
+    job.workDate,
+    job.eventDate,
+    job.date,
+    job.eventDates,
+    job.workDates,
+    job.shiftDate,
+    job.scheduleDate
+  ].filter(value=>String(value||"").trim()!=="");
+
+  if(explicitWorkDateFields.length>0){
+    return true;
+  }
+
+  const text=normalizeJobText([
+    job.shopName,
+    job.area,
+    job.prefecture,
+    job.price,
+    job.originalText,
+    job.remarks,
+    job.workDate,
+    job.eventDate,
+    job.date,
+    job.period,
+    job.workDays,
+    job.schedule,
+    job.category,
+    job.jobType
+  ].join(" "));
+
+  const explicit=
+    /スポット|単発|単日|短期|イベント|催事|応援販売|ヘルプ案件|週末枠|土日枠|平日枠|週末案件|土日案件|イベント人員|クローザー募集|キャッチャー募集|\b4w\b|\b3w\b|\b2w\b|\b1w\b/i
+      .test(text);
+
+  if(explicit)return true;
+
+  const dated=
+    /(?:^|\D)(?:20\d{2}[\/\-.年])?\d{1,2}[\/月]\d{1,2}(?:日)?(?:\D|$)/
+      .test(text);
+
+  const limited=
+    /\d+日間|期間限定|のみ勤務|限定勤務|連勤|稼働日[:：]?\s*\d+[\/・,]|日程[:：]|開催日[:：]|実施日[:：]/
+      .test(text);
+
+  const spotRatePattern=
+    /キャッチャー|クローザー|平日\s*\d+(?:\.\d+)?|土日祝?\s*\d+(?:\.\d+)?|各店\s*\d+名|店舗別/
+      .test(text);
+
+  const multiStorePattern=
+    /.+\/.+/.test(String(job.shopName||"")) ||
+    /店舗[:：]?.+\/.+/.test(text);
+
+  return (dated&&limited)||(dated&&spotRatePattern)||(dated&&multiStorePattern);
+}
+
+function isRemoteJob_(job){
+  const text=normalizeJobText([
+    job.shopName,
+    job.area,
+    job.prefecture,
+    job.originalText,
+    job.remarks,
+    job.workStyle,
+    job.location
+  ].join(" "));
+
+  return /リモート|在宅|テレワーク|在宅勤務|フルリモート/.test(text);
+}
+
+
 let matchingCandidatesLoaded=false;
 let matchingJobsLoaded=false;
 let matchingCandidateItems=[];
@@ -949,7 +1382,6 @@ async function setMatchingMode(mode){
 
 async function runCandidateMatching(){
   showWcLoading_("マッチング中…");
-  if(matchingMode==="job")return runJobMatching();
   const raw=$("matchingCandidateSelect")?.value??"";
   if(raw===""){showToast("求職者を選択してください。","error");return;}
   const c=matchingCandidateItems[Number(raw)];

@@ -1,0 +1,15 @@
+WonderCraft アイコン更新ファイル
+
+assets フォルダへ次のファイルをコピーしてください。
+- favicon.ico
+- favicon-16x16.png
+- favicon-32x32.png
+- apple-touch-icon.png
+- icon-192.png
+- icon-512.png
+- icon-1024.png
+- icon-maskable-192.png
+- icon-maskable-512.png
+- header-logo.png
+
+既存ファイルと同名の場合は「置き換える」を選択してください。
