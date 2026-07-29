@@ -239,7 +239,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.32.9-search-ui-refresh">
+  <link rel="stylesheet" href="./style.css?v=7.33.0-pay-unit">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -253,7 +253,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.32.9</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.33.0</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -410,7 +410,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
             </label>
             <label class="job-origin-station-field">起点駅
               <input id="jobOriginStation" type="search" inputmode="search"
-                placeholder="例：深井駅、名古屋駅">
+                placeholder="例：名古屋駅">
               <small>駅名を入力した場合だけ、片道時間で絞り込みます。</small>
             </label>
             <label class="job-commute-range-field">
@@ -421,13 +421,20 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
               <input id="jobTravelFilter" type="checkbox">
               <span>出張あり案件も表示する</span>
             </label>
-            <label>希望単価（日当） <strong id="jobPayValue">指定なし</strong>
+            <div class="job-pay-filter">
+              <div class="job-pay-heading">
+                <span>希望単価</span>
+                <div class="job-pay-unit-tabs" role="group" aria-label="単価表示">
+                  <button id="jobPayDailyBtn" class="active" type="button">日当</button>
+                  <button id="jobPayHourlyBtn" type="button">時給</button>
+                </div>
+              </div>
+              <strong id="jobPayValue">指定なし</strong>
               <div class="dual-range">
                 <input id="jobPayMin" type="range" min="10000" max="50000" step="1000" value="10000">
                 <input id="jobPayMax" type="range" min="10000" max="50000" step="1000" value="50000">
               </div>
-              
-            </label>
+            </div>
             <div class="spot-only-filter" hidden>
               <label>実施日・開始日（自）
                 <input id="jobSpotDateFrom" type="date">
@@ -482,7 +489,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <article class="notice-card">
           <header><h2>お知らせ</h2></header>
           <div class="notice-list">
-            <p><time>2026/07/27</time> WC-7.32.9 案件検索条件を調整しました。</p>
+            <p><time>2026/07/27</time> WC-7.33.0 案件検索条件を調整しました。</p>
             <p><time>2026/07/26</time> 社員登録・管理者承認に対応しました。</p>
           </div>
         </article>
@@ -607,8 +614,8 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.32.9-search-ui-refresh"></script>
-  <script src="./app.js?v=7.32.9-search-ui-refresh"></script>
+  <script src="./config.js?v=7.33.0-pay-unit"></script>
+  <script src="./app.js?v=7.33.0-pay-unit"></script>
 
 </body>
 </html>

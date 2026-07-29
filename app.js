@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.32.9 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.33.0 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.32.9";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.0";
     }
 
     await initialize();
@@ -281,6 +281,8 @@ function bindEvents(){
   $("runJobSearchBtn")?.addEventListener("click",runStationAwareJobSearch_);
   $("resetJobSearchBtn")?.addEventListener("click",resetJobSearch);
   ["jobDistanceRange","jobPayMin","jobPayMax"].forEach(id=>$(id)?.addEventListener("input",updateJobRangeLabels));
+  $("jobPayDailyBtn")?.addEventListener("click",()=>setJobPayUnit_("daily"));
+  $("jobPayHourlyBtn")?.addEventListener("click",()=>setJobPayUnit_("hourly"));
   $("jobOriginStation")?.addEventListener("input",()=>{
     jobStationSearchApplied=false;
     jobStationCommuteMap={};
@@ -1010,7 +1012,51 @@ async function rejectSkillRequest(requestId){
 let jobSearchLoaded=false;
 let jobSearchItems=[];
 function normalizeJobText(v){return String(v||"").normalize("NFKC").toLowerCase();}
-function extractJobPay(v){const nums=(String(v||"").replace(/,/g,"").match(/\d{3,6}/g)||[]).map(Number);if(!nums.length)return 0;let n=Math.max(...nums);if(n>100000)n=Math.round(n/20/8);else if(n>10000)n=Math.round(n/8);return n;}
+function extractJobDailyPay(v){
+  const text=String(v||"").normalize("NFKC").replace(/,/g,"");
+  const nums=(text.match(/\d{3,7}/g)||[]).map(Number);
+  if(!nums.length)return 0;
+  let n=Math.max(...nums);
+  if(/時給|\/h|hour/i.test(text)||n<=5000)return Math.round(n*8);
+  if(/月給|月額|万円/.test(text)||n>=100000)return Math.round(n/20);
+  return n;
+}
+function extractJobHourlyPay(v){
+  const daily=extractJobDailyPay(v);
+  return daily?Math.round(daily/8/10)*10:0;
+}
+function extractJobPay(v){
+  return jobPayUnit==="hourly"?extractJobHourlyPay(v):extractJobDailyPay(v);
+}
+function formatJobConvertedPay_(v){
+  const amount=extractJobPay(v);
+  if(!amount)return "";
+  return jobPayUnit==="hourly"
+    ? `時給換算 約${amount.toLocaleString()}円`
+    : `日当換算 約${amount.toLocaleString()}円`;
+}
+function setJobPayUnit_(unit){
+  jobPayUnit=unit==="hourly"?"hourly":"daily";
+  $("jobPayDailyBtn")?.classList.toggle("active",jobPayUnit==="daily");
+  $("jobPayHourlyBtn")?.classList.toggle("active",jobPayUnit==="hourly");
+
+  const minEl=$("jobPayMin");
+  const maxEl=$("jobPayMax");
+  if(!minEl||!maxEl)return;
+
+  if(jobPayUnit==="hourly"){
+    minEl.min="1000"; minEl.max="5000"; minEl.step="100";
+    maxEl.min="1000"; maxEl.max="5000"; maxEl.step="100";
+    minEl.value="1000"; maxEl.value="5000";
+  }else{
+    minEl.min="10000"; minEl.max="50000"; minEl.step="1000";
+    maxEl.min="10000"; maxEl.max="50000"; maxEl.step="1000";
+    minEl.value="10000"; maxEl.value="50000";
+  }
+
+  updateJobRangeLabels();
+  renderJobSearchResults();
+}
 function inferCareer(x){const t=normalizeJobText([x.shopName,x.originalText,x.sourceCompany].join(" "));if(/docomo|ドコモ/.test(t))return "docomo";if(/softbank|ソフトバンク|\bsb\b/.test(t))return "SB";if(/\bau\b|エーユー/.test(t))return "au";if(/楽天|rakuten/.test(t))return "楽天";return "その他";}
 async function loadJobSearchOnce(){if(jobSearchLoaded){renderJobSearchResults();return;}showWcLoading_("案件を読み込み中…");try{jobSearchItems=await apiGet("matchingJobs")||[];jobSearchLoaded=true;fillJobSearchFilters();updateJobRangeLabels();renderJobSearchResults();}catch(e){$("jobSearchResults").innerHTML=`<div class="error">${esc(e.message||"案件を取得できませんでした。")}</div>`;}finally{await hideWcLoading_();}}
 const WC_JOB_REGION_MAP={"北海道": ["北海道"], "東北": ["青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"], "関東": ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県"], "甲信越": ["新潟県", "山梨県", "長野県"], "北陸": ["富山県", "石川県", "福井県"], "東海": ["岐阜県", "静岡県", "愛知県", "三重県"], "関西": ["滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"], "中国": ["鳥取県", "島根県", "岡山県", "広島県", "山口県"], "四国": ["徳島県", "香川県", "愛媛県", "高知県"], "九州": ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県"], "沖縄": ["沖縄県"]};
@@ -1058,10 +1104,13 @@ function updateJobRangeLabels(){
     hi=Number($("jobPayMax").value);
   }
 
-  $("jobPayValue").textContent=
-    lo===10000&&hi===50000
-      ?"指定なし"
-      :`${lo.toLocaleString()}円 ～ ${hi.toLocaleString()}円`;
+  const isDefault=jobPayUnit==="hourly"
+    ? lo===1000&&hi===5000
+    : lo===10000&&hi===50000;
+
+  $("jobPayValue").textContent=isDefault
+    ?"指定なし"
+    :`${lo.toLocaleString()}円 ～ ${hi.toLocaleString()}円`;
 }
 function resetJobSearch(){
   ["jobRegionFilter","jobCompanyFilter","jobCareerFilter","jobBeginnerFilter"].forEach(id=>{
@@ -1075,8 +1124,7 @@ function resetJobSearch(){
   jobStationSearchApplied=false;
   jobStationSearchOrigin="";
   jobStationApiUnavailable=false;
-  $("jobPayMin").value=10000;
-  $("jobPayMax").value=50000;
+  setJobPayUnit_("daily");
   if($("jobTravelFilter"))$("jobTravelFilter").checked=false;
   if($("jobRemoteFilter"))$("jobRemoteFilter").value="exclude";
   if($("jobSpotDateFrom"))$("jobSpotDateFrom").value="";
@@ -1187,8 +1235,8 @@ function renderJobSearchResults(){
   const career=$("jobCareerFilter")?.value||"";
   const beginner=$("jobBeginnerFilter")?.value||"";
   const q=normalizeJobText($("jobKeywordFilter")?.value||"");
-  const min=Number($("jobPayMin")?.value||10000);
-  const max=Number($("jobPayMax")?.value||50000);
+  const min=Number($("jobPayMin")?.value||(jobPayUnit==="hourly"?1000:10000));
+  const max=Number($("jobPayMax")?.value||(jobPayUnit==="hourly"?5000:50000));
   const maxMinutes=Number($("jobDistanceRange")?.value||60);
   const originStation=String($("jobOriginStation")?.value||"").trim();
   const includeTravel=$("jobTravelFilter")?.checked===true;
@@ -1257,6 +1305,7 @@ function renderJobSearchResults(){
           ${date?`<span>📅 ${esc(date)}</span>`:""}
           ${commute!==null?`<span>🚃 約${commute}分</span>`:""}
           <span>💴 ${esc(x.price||"単価要確認")}</span>
+          ${formatJobConvertedPay_(x.price)?`<span class="job-pay-converted">${esc(formatJobConvertedPay_(x.price))}</span>`:""}
         </div>
         <div class="job-card-sub">
           <span>🏢 ${esc(x.sourceCompany||"案件元要確認")}</span>
@@ -1277,6 +1326,7 @@ let jobStationCommuteMap={};
 let jobStationSearchApplied=false;
 let jobStationSearchOrigin="";
 let jobStationApiUnavailable=false;
+let jobPayUnit="daily";
 
 
 function setJobSearchMode_(mode){
