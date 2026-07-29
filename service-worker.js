@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-7-33-2-svg-icons";
+const CACHE="wondercraft-wc-7-33-3-commute-batches";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.2-svg-icons",
-  "./config.js?v=7.33.2-svg-icons",
-  "./app.js?v=7.33.2-svg-icons",
+  "./style.css?v=7.33.3-commute-batches",
+  "./config.js?v=7.33.3-commute-batches",
+  "./app.js?v=7.33.3-commute-batches",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",

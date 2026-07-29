@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.33.2 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.33.3 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.2";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.3";
     }
 
     await initialize();
@@ -1151,42 +1151,96 @@ async function runStationAwareJobSearch_(){
 
   const candidates=(jobSearchCurrentItems||[])
     .filter(job=>Number(job.rowNumber)>0)
-    .slice(0,35);
+    .slice(0,24);
 
   if(!candidates.length)return;
 
-  showWcLoading_(`${origin}からの通勤時間を計算中…`);
-  try{
-    const result=await apiPost("stationJobCommutes",{
-      station:origin,
-      rowNumbers:candidates.map(job=>Number(job.rowNumber))
-    });
+  const batchSize=4;
+  const batches=[];
+  for(let i=0;i<candidates.length;i+=batchSize){
+    batches.push(candidates.slice(i,i+batchSize));
+  }
 
-    const rows=Array.isArray(result?.results)?result.results:[];
-    jobStationCommuteMap={};
-    rows.forEach(row=>{
-      jobStationCommuteMap[String(row.rowNumber)]=row;
-    });
+  let successCount=0;
+  let failedBatchCount=0;
+  jobStationCommuteMap={};
+
+  showWcLoading_(`${origin}からの通勤時間を確認中…`);
+
+  try{
+    for(let index=0;index<batches.length;index++){
+      const batch=batches[index];
+
+      updateWcLoadingText_?.(
+        `${origin}からの通勤時間を確認中… ${index+1}/${batches.length}`
+      );
+
+      try{
+        const result=await apiPost("stationJobCommutes",{
+          station:origin,
+          rowNumbers:batch.map(job=>Number(job.rowNumber))
+        });
+
+        const rows=Array.isArray(result?.results)?result.results:[];
+        rows.forEach(row=>{
+          jobStationCommuteMap[String(row.rowNumber)]=row;
+          if(row?.ok&&Number.isFinite(Number(row.minutes)))successCount++;
+        });
+
+        // 取得できた分から画面へ反映
+        jobStationSearchApplied=true;
+        renderJobSearchResults();
+      }catch(batchError){
+        failedBatchCount++;
+        const message=String(batchError?.message||"");
+        if(/未対応のAPI action|stationJobCommutes/i.test(message)){
+          jobStationApiUnavailable=true;
+          throw batchError;
+        }
+        // タイムアウトしたバッチだけ飛ばして次を続行
+        batch.forEach(job=>{
+          jobStationCommuteMap[String(job.rowNumber)]={
+            rowNumber:Number(job.rowNumber),
+            ok:false,
+            minutes:null,
+            reason:"BATCH_TIMEOUT"
+          };
+        });
+      }
+    }
+
     jobStationSearchApplied=true;
     renderJobSearchResults();
+
+    if(failedBatchCount>0){
+      const box=$("jobSearchResults");
+      box?.insertAdjacentHTML(
+        "afterbegin",
+        `<div class="job-search-notice compact">一部の通勤時間を取得できませんでした。取得できた案件を表示しています。</div>`
+      );
+    }else if(successCount===0){
+      const box=$("jobSearchResults");
+      box?.insertAdjacentHTML(
+        "afterbegin",
+        `<div class="job-search-notice compact">通勤時間を取得できる案件がありませんでした。勤務地の記載を確認してください。</div>`
+      );
+    }
   }catch(error){
     jobStationSearchApplied=false;
-    jobStationCommuteMap={};
     const message=String(error?.message||"");
     jobStationApiUnavailable=/未対応のAPI action|stationJobCommutes/i.test(message);
 
-    // 通勤時間APIが未反映でも、その他の条件検索は止めない。
     renderJobSearchResults();
 
     const box=$("jobSearchResults");
     if(box){
       const notice=jobStationApiUnavailable
-        ? "通勤時間連携がまだGASに反映されていないため、駅からの時間以外の条件で検索結果を表示しています。"
-        : `駅からの通勤時間だけ取得できませんでした。その他の条件では検索できています。${message ? "（"+esc(message)+"）" : ""}`;
+        ? "通勤時間検索を利用するには、最新GASの再デプロイが必要です。"
+        : "通勤時間だけ取得できませんでした。その他の条件で検索結果を表示しています。";
 
       box.insertAdjacentHTML(
         "afterbegin",
-        `<div class="job-search-notice">${notice}</div>`
+        `<div class="job-search-notice compact">${notice}</div>`
       );
     }
   }finally{

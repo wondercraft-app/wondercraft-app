@@ -2457,3 +2457,9 @@ header.app-header{
   width:20px;
   height:20px;
 }
+
+.job-search-notice.compact{
+  padding:10px 12px!important;
+  font-size:12px!important;
+  line-height:1.45!important;
+}
