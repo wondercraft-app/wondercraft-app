@@ -2473,3 +2473,13 @@ header.app-header{
   font-size:12px!important;
   font-weight:800!important;
 }
+
+/* WC-7.33.6 案件文言からの通勤圏候補 */
+.job-text-candidate{
+  color:#0b6b5b!important;
+  background:#e8f8f4!important;
+  border-radius:999px!important;
+  padding:3px 8px!important;
+  font-size:12px!important;
+  font-weight:800!important;
+}

@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.33.4 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.33.6 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.4";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.6";
     }
 
     await initialize();
@@ -1216,13 +1216,13 @@ async function runStationAwareJobSearch_(){
       const box=$("jobSearchResults");
       box?.insertAdjacentHTML(
         "afterbegin",
-        `<div class="job-search-notice compact">一部の案件は店舗未定または経路未取得のため、通勤時間要確認として表示しています。</div>`
+        `<div class="job-search-notice compact">通勤時間内の案件、最寄り駅から選定する案件、案件文言から通勤圏内と判断できる候補を表示しています。</div>`
       );
     }else if(successCount===0){
       const box=$("jobSearchResults");
       box?.insertAdjacentHTML(
         "afterbegin",
-        `<div class="job-search-notice compact">店舗未定または勤務地不明の案件は、通勤時間要確認として表示しています。</div>`
+        `<div class="job-search-notice compact">通勤時間を取得できませんでした。最寄り駅から店舗を選定する案件のみ表示しています。</div>`
       );
     }
   }catch(error){
@@ -1305,6 +1305,77 @@ function isNearestSelectionJob_(job){
   ].some(word=>text.includes(normalizeJobText(word)));
 }
 
+function normalizeStationNameForCandidate_(value){
+  return normalizeJobText(String(value||""))
+    .replace(/駅$/,"")
+    .replace(/\s+/g,"");
+}
+
+function getJobTextCandidateReason_(job,originStation,maxMinutes){
+  const origin=normalizeStationNameForCandidate_(originStation);
+  if(!origin)return "";
+
+  const text=normalizeJobText([
+    job?.shopName,
+    job?.prefecture,
+    job?.area,
+    job?.originalText,
+    job?.remarks,
+    job?.location,
+    job?.nearestStation
+  ].join(" "));
+
+  if(!text)return "";
+
+  // 起点駅そのもの、または「○○駅周辺・近郊・市内」などが書かれている
+  const directWords=[
+    origin+"駅",
+    origin+"周辺",
+    origin+"近郊",
+    origin+"エリア",
+    origin+"市内"
+  ];
+  if(directWords.some(word=>text.includes(normalizeJobText(word)))){
+    return "起点駅周辺の記載あり";
+  }
+
+  // 文中に明示された通勤時間条件
+  const minuteMatches=[
+    /(?:通勤|片道|所要時間)[^\d]{0,8}(\d{1,3})分(?:以内|圏内)?/,
+    /(\d{1,3})分(?:以内|圏内)[^\n]{0,10}(?:通勤|片道|所要時間)?/,
+    /(?:1時間|一時間)(?:以内|圏内)/
+  ];
+
+  for(const pattern of minuteMatches){
+    const match=text.match(pattern);
+    if(!match)continue;
+
+    const statedMinutes=match[1] ? Number(match[1]) : 60;
+    if(Number.isFinite(statedMinutes) && statedMinutes<=Number(maxMinutes||60)){
+      return `${statedMinutes}分圏内の記載あり`;
+    }
+  }
+
+  // 名古屋起点で候補にできる具体地名
+  // 広すぎる「愛知県内」「東海全域」だけでは候補にしない
+  const localCandidateMap={
+    "名古屋":[
+      "名古屋市","名駅","栄","金山","伏見","丸の内","大曽根","千種",
+      "今池","本山","星ヶ丘","藤が丘","八事","新瑞橋","名古屋港",
+      "中区","中村区","東区","西区","北区","昭和区","瑞穂区",
+      "熱田区","中川区","港区","南区","守山区","緑区","名東区","天白区"
+    ]
+  };
+
+  const words=localCandidateMap[origin]||[];
+  const hit=words.find(word=>text.includes(normalizeJobText(word)));
+  if(hit){
+    return `${hit}の記載あり`;
+  }
+
+  return "";
+}
+
 function getJobDisplayName_(job){
   const name=String(job?.shopName||"").trim();
   if(name&&name!=="案件名未設定")return name;
@@ -1349,11 +1420,22 @@ function renderJobSearchResults(){
     const regionOk=!region||jobRegion===region;
     const areaOk=!area||(area===region?jobRegion===region:String(x.prefecture||"").trim()===area);
     const travelOk=includeTravel||!travel;
-    // 経路を取得できた案件だけ分数条件を適用する。
-    // 店舗未定・最寄りから選定・勤務地不明は除外せず「要確認」で残す。
+    // 起点駅検索の完了後は、
+    // 1. 指定時間以内と確認できた案件
+    // 2. 「最寄りから選定」「店舗未定」など勤務地を後決めする案件
+    // だけを残す。未確認の全案件は表示しない。
+    const textCandidateReason=getJobTextCandidateReason_(x,originStation,maxMinutes);
     const commuteOk=!originStation
       ? true
-      : (!jobStationSearchApplied || commute===null || commute<=maxMinutes);
+      : (
+          !jobStationSearchApplied
+            ? true
+            : (
+                (commute!==null && commute<=maxMinutes) ||
+                isNearestSelectionJob_(x) ||
+                !!textCandidateReason
+              )
+        );
     const payOk=!pay||(pay>=min&&pay<=max);
 
     return modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&commuteOk&&payOk&&
@@ -1378,6 +1460,7 @@ function renderJobSearchResults(){
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
+    const textCandidateReason=getJobTextCandidateReason_(x,originStation,maxMinutes);
     const spot=isSpotJob_(x);
     const remote=isRemoteJob_(x);
     const travel=isTravelJob_(x);
@@ -1391,7 +1474,13 @@ function renderJobSearchResults(){
         <div class="job-card-meta">
           <span>📍 ${esc(x.prefecture||x.area||"勤務地要確認")}</span>
           ${date?`<span>📅 ${esc(date)}</span>`:""}
-          ${commute!==null?`<span>🚃 約${commute}分</span>`:(originStation&&jobStationSearchApplied?`<span class="job-commute-pending">🚃 通勤時間要確認</span>`:"")}
+          ${commute!==null
+            ? `<span>🚃 約${commute}分</span>`
+            : (originStation&&jobStationSearchApplied&&isNearestSelectionJob_(x)
+                ? `<span class="job-commute-pending">🚃 最寄り駅から選定</span>`
+                : (originStation&&jobStationSearchApplied&&textCandidateReason
+                    ? `<span class="job-text-candidate">📍 ${esc(textCandidateReason)}・候補</span>`
+                    : ""))}
           <span>💴 ${esc(x.price||"単価要確認")}</span>
           ${formatJobConvertedPay_(x.price)?`<span class="job-pay-converted">${esc(formatJobConvertedPay_(x.price))}</span>`:""}
         </div>
