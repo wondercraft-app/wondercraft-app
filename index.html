@@ -239,7 +239,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.33.1-header-nav">
+  <link rel="stylesheet" href="./style.css?v=7.33.2-svg-icons">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -253,7 +253,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.33.1</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.33.2</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -265,7 +265,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <header><div class="menu-avatar">●</div><div><strong id="menuUserName">WonderCraft</strong><small id="menuUserEmail"></small></div><button id="closeMenuBtn" type="button" aria-label="閉じる">×</button></header>
       <nav>
         <button type="button" data-view="home">⌂ <span>ホーム</span></button>
-        <button type="button" data-view="jobsearch">⌕ <span>案件検索（希望条件から探す）</span></button>
+        <button type="button" data-view="jobsearch"><span class="menu-line-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.7"/><path d="m14.8 14.8 5 5"/></svg></span><span>案件検索（希望条件から探す）</span></button>
         <button type="button" data-view="candidates">♙ <span>求職者</span></button>
         <button type="button" data-view="progress">▣ <span>案件進捗</span></button>
         <button type="button" data-view="matching">◎ <span>マッチング</span></button>
@@ -370,7 +370,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <section id="jobSearchSection" class="job-search-section" hidden>
         <section class="matching-hero job-search-hero">
           <p class="eyebrow">JOB SEARCH</p>
-          <div class="job-hero-title"><span class="job-hero-icon">⌕</span><h1>案件検索</h1></div>
+          <div class="job-hero-title"><span class="job-hero-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.7"/><path d="m14.8 14.8 5 5"/></svg></span><h1>案件検索</h1></div>
           <p>希望条件を設定して、マッチング以外の案件を自由に検索できます。</p>
         </section>
         <div class="job-search-mode-tabs">
@@ -449,7 +449,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
             <label>提案元会社<select id="jobCompanyFilter"><option value="">すべて</option></select></label>
             <label>経験条件<select id="jobBeginnerFilter"><option value="">指定なし</option><option value="可">未経験可</option><option value="不可">経験者のみ</option></select></label>
             <label>キーワード<input id="jobKeywordFilter" type="search" placeholder="案件名・店舗・備考など"></label>
-            <button id="runJobSearchBtn" class="primary" type="button"><span class="job-search-button-icon">⌕</span><span>この条件で検索する</span></button>
+            <button id="runJobSearchBtn" class="primary" type="button"><span class="job-search-button-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.7"/><path d="m14.8 14.8 5 5"/></svg></span><span>この条件で検索する</span></button>
           </aside>
           <section class="job-result-panel">
             <div class="job-result-head"><div><div><span class="job-section-kicker">SEARCH RESULTS</span><h2>検索結果</h2></div><p id="jobResultModeNote" class="job-result-note">スポット案件は表示していません。</p></div><span id="jobResultCount" class="result-count">0件</span></div>
@@ -489,7 +489,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <article class="notice-card">
           <header><h2>お知らせ</h2></header>
           <div class="notice-list">
-            <p><time>2026/07/27</time> WC-7.33.1 案件検索条件を調整しました。</p>
+            <p><time>2026/07/27</time> WC-7.33.2 案件検索条件を調整しました。</p>
             <p><time>2026/07/26</time> 社員登録・管理者承認に対応しました。</p>
           </div>
         </article>
@@ -564,12 +564,12 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   </div>
 
   <nav class="bottom-nav six-nav" aria-label="メインメニュー">
-    <button class="active" type="button" data-view="home"><span class="nav-icon">⌂</span><span>ホーム</span></button>
-    <button type="button" data-view="candidates"><span class="nav-icon">♙</span><span>求職者</span></button>
-    <button type="button" data-view="progress"><span class="nav-icon">▣</span><span>案件進捗</span></button>
-    <button type="button" data-view="jobsearch"><span class="nav-icon">⌕</span><span>案件検索</span></button>
-    <button type="button" data-view="matching"><span class="nav-icon">◎</span><span>マッチング</span></button>
-    <button type="button" data-view="management"><span class="nav-icon">⚙</span><span>管理</span></button>
+    <button class="active" type="button" data-view="home"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.7 12 3.8l8.5 6.9v9.1a1 1 0 0 1-1 1h-5.2v-6.2H9.7v6.2H4.5a1 1 0 0 1-1-1z"/></svg></span><span class="nav-label">ホーム</span></button>
+    <button type="button" data-view="candidates"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.2" r="3.2"/><path d="M5.6 20.2c.5-4 2.7-6.4 6.4-6.4s5.9 2.4 6.4 6.4z"/></svg></span><span class="nav-label">求職者</span></button>
+    <button type="button" data-view="progress"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="3.8" width="15" height="16.4" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span class="nav-label">案件進捗</span></button>
+    <button type="button" data-view="jobsearch"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.7"/><path d="m14.8 14.8 5 5"/></svg></span><span class="nav-label">案件検索</span></button>
+    <button type="button" data-view="matching"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.6"/></svg></span><span class="nav-label">マッチング</span></button>
+    <button type="button" data-view="management"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.8v2.1M12 19.1v2.1M21.2 12h-2.1M4.9 12H2.8M18.5 5.5 17 7M7 17l-1.5 1.5M18.5 18.5 17 17M7 7 5.5 5.5"/><circle cx="12" cy="12" r="7.1"/></svg></span><span class="nav-label">管理</span></button>
   </nav>
 
   <div id="wcLoadingOverlay" class="wc-loading-overlay" aria-live="polite" aria-busy="true">
@@ -614,8 +614,8 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.33.1-header-nav"></script>
-  <script src="./app.js?v=7.33.1-header-nav"></script>
+  <script src="./config.js?v=7.33.2-svg-icons"></script>
+  <script src="./app.js?v=7.33.2-svg-icons"></script>
 
 </body>
 </html>

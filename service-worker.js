@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-7-33-1-header-nav";
+const CACHE="wondercraft-wc-7-33-2-svg-icons";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.1-header-nav",
-  "./config.js?v=7.33.1-header-nav",
-  "./app.js?v=7.33.1-header-nav",
+  "./style.css?v=7.33.2-svg-icons",
+  "./config.js?v=7.33.2-svg-icons",
+  "./app.js?v=7.33.2-svg-icons",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",
