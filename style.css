@@ -1077,3 +1077,18 @@ main{max-width:1480px;padding:18px 24px 100px}
   }
 }
 
+
+/* WC-7.32.7 station-origin commute search */
+.job-origin-station-field{grid-column:span 2!important;}
+.job-origin-station-field small{
+  display:block;margin-top:3px;color:#6b778a;font-size:11px;line-height:1.35;
+}
+.job-commute-range-field{grid-column:span 2!important;}
+.job-commute-range-field > span{
+  display:flex;flex-wrap:wrap;align-items:center;gap:4px;
+}
+#jobOriginStationLabel{color:#075cc7;}
+@media(max-width:700px){
+  .job-origin-station-field,.job-commute-range-field{grid-column:1 / -1!important;}
+  .job-origin-station-field input{min-height:46px!important;}
+}

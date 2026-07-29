@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.32.5 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.32.7 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.32.5";
+      $("appVersion").textContent=config.VERSION||"WC-7.32.7";
     }
 
     await initialize();
@@ -278,9 +278,20 @@ function bindEvents(){
   $("editForm")?.addEventListener("submit",saveEdit);
   $("openSkillSheetBtn")?.addEventListener("click",openSkillSheet);
   $("runMatchingBtn")?.addEventListener("click",runCandidateMatching);
-  $("runJobSearchBtn")?.addEventListener("click",renderJobSearchResults);
+  $("runJobSearchBtn")?.addEventListener("click",runStationAwareJobSearch_);
   $("resetJobSearchBtn")?.addEventListener("click",resetJobSearch);
   ["jobDistanceRange","jobPayMin","jobPayMax"].forEach(id=>$(id)?.addEventListener("input",updateJobRangeLabels));
+  $("jobOriginStation")?.addEventListener("input",()=>{
+    jobStationSearchApplied=false;
+    jobStationCommuteMap={};
+    updateJobRangeLabels();
+  });
+  $("jobOriginStation")?.addEventListener("keydown",event=>{
+    if(event.key==="Enter"){
+      event.preventDefault();
+      runStationAwareJobSearch_();
+    }
+  });
   $("jobModeLongBtn")?.addEventListener("click",()=>setJobSearchMode_("long"));
   $("jobModeSpotBtn")?.addEventListener("click",()=>setJobSearchMode_("spot"));
   $("jobRegionFilter")?.addEventListener("change",()=>{updateJobPrefectureOptions();renderJobSearchResults();});
@@ -1032,7 +1043,11 @@ function fillJobSearchFilters(){
 }
 function updateJobRangeLabels(){
   const d=Number($("jobDistanceRange").value);
-  $("jobDistanceValue").textContent=d>=120?"指定なし":`${d}分以内`;
+  const origin=String($("jobOriginStation")?.value||"").trim();
+  $("jobDistanceValue").textContent=origin?`${d}分以内`:"指定なし";
+  if($("jobOriginStationLabel")){
+    $("jobOriginStationLabel").textContent=origin||"起点駅";
+  }
 
   let lo=Number($("jobPayMin").value);
   let hi=Number($("jobPayMax").value);
@@ -1054,7 +1069,11 @@ function resetJobSearch(){
   });
 
   $("jobKeywordFilter").value="";
-  $("jobDistanceRange").value=120;
+  if($("jobOriginStation"))$("jobOriginStation").value="";
+  $("jobDistanceRange").value=60;
+  jobStationCommuteMap={};
+  jobStationSearchApplied=false;
+  jobStationSearchOrigin="";
   $("jobPayMin").value=10000;
   $("jobPayMax").value=50000;
   if($("jobTravelFilter"))$("jobTravelFilter").checked=false;
@@ -1067,6 +1086,54 @@ function resetJobSearch(){
   updateJobRangeLabels();
   renderJobSearchResults();
 }
+async function runStationAwareJobSearch_(){
+  const origin=String($("jobOriginStation")?.value||"").trim();
+  jobStationSearchApplied=false;
+  jobStationCommuteMap={};
+  jobStationSearchOrigin=origin;
+
+  renderJobSearchResults();
+
+  if(!origin){
+    updateJobRangeLabels();
+    return;
+  }
+
+  const candidates=(jobSearchCurrentItems||[])
+    .filter(job=>Number(job.rowNumber)>0)
+    .slice(0,35);
+
+  if(!candidates.length)return;
+
+  showWcLoading_(`${origin}からの通勤時間を計算中…`);
+  try{
+    const result=await apiPost("stationJobCommutes",{
+      station:origin,
+      rowNumbers:candidates.map(job=>Number(job.rowNumber))
+    });
+
+    const rows=Array.isArray(result?.results)?result.results:[];
+    jobStationCommuteMap={};
+    rows.forEach(row=>{
+      jobStationCommuteMap[String(row.rowNumber)]=row;
+    });
+    jobStationSearchApplied=true;
+    renderJobSearchResults();
+  }catch(error){
+    jobStationSearchApplied=false;
+    jobStationCommuteMap={};
+    const box=$("jobSearchResults");
+    if(box){
+      box.insertAdjacentHTML(
+        "afterbegin",
+        `<div class="error">駅からの通勤時間を取得できませんでした。${esc(error?.message||"")}</div>`
+      );
+    }
+  }finally{
+    await hideWcLoading_(true);
+  }
+}
+
 function getJobCommuteMinutes_(x){
   const direct=[
     x.commuteMinutes,x.travelMinutes,x.accessMinutes,x.routeMinutes,
@@ -1110,7 +1177,8 @@ function renderJobSearchResults(){
   const q=normalizeJobText($("jobKeywordFilter")?.value||"");
   const min=Number($("jobPayMin")?.value||10000);
   const max=Number($("jobPayMax")?.value||50000);
-  const maxMinutes=Number($("jobDistanceRange")?.value||120);
+  const maxMinutes=Number($("jobDistanceRange")?.value||60);
+  const originStation=String($("jobOriginStation")?.value||"").trim();
   const includeTravel=$("jobTravelFilter")?.checked===true;
   const remoteMode=$("jobRemoteFilter")?.value||"exclude";
   const dateFrom=$("jobSpotDateFrom")?.value||"";
@@ -1119,7 +1187,10 @@ function renderJobSearchResults(){
   let items=jobSearchItems.filter(x=>{
     const text=normalizeJobText([x.shopName,x.prefecture,x.area,x.sourceCompany,x.price,x.originalText,x.beginnerAvailability,x.remarks].join(" "));
     const pay=extractJobPay(x.price);
-    const commute=getJobCommuteMinutes_(x);
+    const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+    const commute=originStation
+      ? (routeInfo&&Number.isFinite(Number(routeInfo.minutes))?Number(routeInfo.minutes):null)
+      : getJobCommuteMinutes_(x);
     const jobRegion=getJobRegion_(x);
     const travel=isTravelJob_(x);
     const spot=isSpotJob_(x);
@@ -1132,7 +1203,9 @@ function renderJobSearchResults(){
     const regionOk=!region||jobRegion===region;
     const areaOk=!area||(area===region?jobRegion===region:String(x.prefecture||"").trim()===area);
     const travelOk=includeTravel||!travel;
-    const commuteOk=maxMinutes>=120||commute===null||commute<=maxMinutes;
+    const commuteOk=!originStation
+      ? true
+      : (!jobStationSearchApplied ? true : (commute!==null&&commute<=maxMinutes));
     const payOk=!pay||(pay>=min&&pay<=max);
 
     return modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&commuteOk&&payOk&&
@@ -1141,6 +1214,8 @@ function renderJobSearchResults(){
       (!beginner||normalizeJobText(x.beginnerAvailability).includes(normalizeJobText(beginner)))&&
       (!q||text.includes(q));
   });
+
+  jobSearchCurrentItems=items.slice();
 
   const sort=$("jobSort")?.value||"new";
   if(sort==="payHigh")items.sort((a,b)=>extractJobPay(b.price)-extractJobPay(a.price));
@@ -1151,7 +1226,10 @@ function renderJobSearchResults(){
   if(!items.length){box.innerHTML='<div class="empty job-empty">条件に合う案件がありません。</div>';return;}
 
   box.innerHTML=items.slice(0,20).map(x=>{
-    const commute=getJobCommuteMinutes_(x);
+    const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+    const commute=originStation
+      ? (routeInfo&&Number.isFinite(Number(routeInfo.minutes))?Number(routeInfo.minutes):null)
+      : getJobCommuteMinutes_(x);
     const spot=isSpotJob_(x);
     const remote=isRemoteJob_(x);
     const travel=isTravelJob_(x);
@@ -1182,6 +1260,11 @@ function renderJobSearchResults(){
 }
 
 let jobSearchMode="long";
+let jobSearchCurrentItems=[];
+let jobStationCommuteMap={};
+let jobStationSearchApplied=false;
+let jobStationSearchOrigin="";
+
 
 function setJobSearchMode_(mode){
   jobSearchMode=mode==="spot"?"spot":"long";

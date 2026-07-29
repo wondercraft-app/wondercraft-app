@@ -239,7 +239,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.32.5-slider-chevron">
+  <link rel="stylesheet" href="./style.css?v=7.32.7-station-origin">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -253,7 +253,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.32.5</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.32.7</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -408,9 +408,14 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
                 <option value="only">リモートのみ</option>
               </select>
             </label>
-            <label>通勤時間 <strong id="jobDistanceValue">指定なし</strong>
-              <input id="jobDistanceRange" type="range" min="0" max="120" step="10" value="120">
-              
+            <label class="job-origin-station-field">起点駅
+              <input id="jobOriginStation" type="search" inputmode="search"
+                placeholder="例：深井駅、名古屋駅">
+              <small>入力した駅から案件勤務地までの片道時間を検索します。</small>
+            </label>
+            <label class="job-commute-range-field">
+              <span><strong id="jobOriginStationLabel">起点駅</strong>から片道 <strong id="jobDistanceValue">指定なし</strong></span>
+              <input id="jobDistanceRange" type="range" min="10" max="120" step="10" value="60">
             </label>
             <label class="job-check-row">
               <input id="jobTravelFilter" type="checkbox">
@@ -477,7 +482,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <article class="notice-card">
           <header><h2>お知らせ</h2></header>
           <div class="notice-list">
-            <p><time>2026/07/27</time> WC-7.32.5 案件検索条件を調整しました。</p>
+            <p><time>2026/07/27</time> WC-7.32.7 案件検索条件を調整しました。</p>
             <p><time>2026/07/26</time> 社員登録・管理者承認に対応しました。</p>
           </div>
         </article>
@@ -602,8 +607,8 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.32.5-slider-chevron"></script>
-  <script src="./app.js?v=7.32.5-slider-chevron"></script>
+  <script src="./config.js?v=7.32.7-station-origin"></script>
+  <script src="./app.js?v=7.32.7-station-origin"></script>
 
 </body>
 </html>
