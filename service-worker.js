@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-7-33-0-pay-unit";
+const CACHE="wondercraft-wc-7-33-1-header-nav";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.0-pay-unit",
-  "./config.js?v=7.33.0-pay-unit",
-  "./app.js?v=7.33.0-pay-unit",
+  "./style.css?v=7.33.1-header-nav",
+  "./config.js?v=7.33.1-header-nav",
+  "./app.js?v=7.33.1-header-nav",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",
