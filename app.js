@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.33.7 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.33.8 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.7";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.8";
     }
 
     await initialize();
@@ -283,15 +283,39 @@ function bindEvents(){
   ["jobDistanceRange","jobPayMin","jobPayMax"].forEach(id=>$(id)?.addEventListener("input",updateJobRangeLabels));
   $("jobPayDailyBtn")?.addEventListener("click",()=>setJobPayUnit_("daily"));
   $("jobPayHourlyBtn")?.addEventListener("click",()=>setJobPayUnit_("hourly"));
-  $("jobOriginStation")?.addEventListener("input",()=>{
+  $("jobOriginStation")?.addEventListener("input",event=>{
+    const value=String(event.target.value||"");
+    if(!jobOriginStationSelection ||
+       normalizeStationLookup_(value)!==normalizeStationLookup_(jobOriginStationSelection.name)){
+      jobOriginStationSelection=null;
+      const message=$("jobOriginStationMessage");
+      if(message){
+        message.textContent="駅名を入力し、都道府県・住所を確認して候補から選択してください。";
+        message.classList.remove("selected");
+      }
+    }
     jobStationSearchApplied=false;
     jobStationCommuteMap={};
+    renderStationCandidates_(value);
     updateJobRangeLabels();
   });
+  $("jobOriginStation")?.addEventListener("focus",event=>{
+    if(String(event.target.value||"").trim())renderStationCandidates_(event.target.value);
+  });
+  $("jobOriginStation")?.addEventListener("blur",()=>setTimeout(closeStationCandidates_,180));
   $("jobOriginStation")?.addEventListener("keydown",event=>{
+    if(event.key==="ArrowDown"){event.preventDefault();moveStationCandidate_(1);return;}
+    if(event.key==="ArrowUp"){event.preventDefault();moveStationCandidate_(-1);return;}
+    if(event.key==="Escape"){closeStationCandidates_();return;}
     if(event.key==="Enter"){
       event.preventDefault();
-      runStationAwareJobSearch_();
+      const box=$("jobOriginStationCandidates");
+      const candidates=box?box._wcCandidates:[];
+      if(box&&!box.hidden&&jobOriginStationActiveIndex>=0&&candidates?.[jobOriginStationActiveIndex]){
+        selectOriginStation_(candidates[jobOriginStationActiveIndex]);
+      }else{
+        runStationAwareJobSearch_();
+      }
     }
   });
   $("jobModeLongBtn")?.addEventListener("click",()=>setJobSearchMode_("long"));
@@ -1079,6 +1103,128 @@ function updateJobPrefectureOptions(){
     prefectures.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");
 }
 
+function normalizeStationLookup_(value){
+  return String(value||"").normalize("NFKC").toLowerCase()
+    .replace(/\s+/g,"").replace(/駅$/,"");
+}
+function getStationMaster_(){
+  return Array.isArray(window.WC_STATIONS)?window.WC_STATIONS:[];
+}
+function findStationCandidates_(query){
+  const q=normalizeStationLookup_(query);
+  if(!q)return [];
+  const exact=[],starts=[],includes=[];
+  for(const station of getStationMaster_()){
+    const name=normalizeStationLookup_(station.n);
+    const address=normalizeStationLookup_(station.a);
+    const prefecture=normalizeStationLookup_(station.p);
+    if(name===q)exact.push(station);
+    else if(name.startsWith(q))starts.push(station);
+    else if(name.includes(q)||address.includes(q)||prefecture.includes(q))includes.push(station);
+  }
+  const out=[],seen=new Set();
+  for(const station of [...exact,...starts,...includes]){
+    const key=`${station.i}:${station.n}:${station.p}`;
+    if(seen.has(key))continue;
+    seen.add(key);
+    out.push(station);
+    if(out.length>=12)break;
+  }
+  return out;
+}
+function closeStationCandidates_(){
+  const box=$("jobOriginStationCandidates");
+  if(box)box.hidden=true;
+  jobOriginStationActiveIndex=-1;
+}
+function selectOriginStation_(station){
+  if(!station)return;
+  jobOriginStationSelection={
+    id:String(station.i||""),
+    stationCodes:Array.isArray(station.c)?station.c:[],
+    name:String(station.n||""),
+    prefecture:String(station.p||""),
+    address:String(station.a||""),
+    longitude:Number(station.x),
+    latitude:Number(station.y),
+    lineCodes:Array.isArray(station.l)?station.l:[]
+  };
+  const input=$("jobOriginStation");
+  if(input)input.value=`${jobOriginStationSelection.name}駅`;
+  const message=$("jobOriginStationMessage");
+  if(message){
+    message.textContent=`選択中：${jobOriginStationSelection.name}駅（${jobOriginStationSelection.prefecture}） ${jobOriginStationSelection.address}`;
+    message.classList.add("selected");
+  }
+  jobStationSearchApplied=false;
+  jobStationCommuteMap={};
+  closeStationCandidates_();
+  updateJobRangeLabels();
+}
+function renderStationCandidates_(query){
+  const box=$("jobOriginStationCandidates");
+  if(!box)return;
+  const candidates=findStationCandidates_(query);
+  jobOriginStationActiveIndex=-1;
+  box._wcCandidates=candidates;
+  if(!candidates.length){
+    box.innerHTML='<div class="station-candidate-empty">該当する駅がありません</div>';
+    box.hidden=false;
+    return;
+  }
+  box.innerHTML=candidates.map((station,index)=>`
+    <button type="button" class="station-candidate" role="option" data-station-index="${index}">
+      <span class="station-candidate-main">${esc(station.n)}駅</span>
+      <span class="station-candidate-pref">${esc(station.p||"都道府県不明")}</span>
+      <span class="station-candidate-address">${esc(station.a||"住所不明")}</span>
+    </button>`).join("");
+  box.hidden=false;
+  box.querySelectorAll("[data-station-index]").forEach(button=>{
+    button.addEventListener("mousedown",event=>event.preventDefault());
+    button.addEventListener("click",()=>selectOriginStation_(candidates[Number(button.dataset.stationIndex)]));
+  });
+}
+function moveStationCandidate_(direction){
+  const box=$("jobOriginStationCandidates");
+  if(!box||box.hidden)return false;
+  const buttons=[...box.querySelectorAll(".station-candidate")];
+  if(!buttons.length)return false;
+  jobOriginStationActiveIndex+=direction;
+  if(jobOriginStationActiveIndex<0)jobOriginStationActiveIndex=buttons.length-1;
+  if(jobOriginStationActiveIndex>=buttons.length)jobOriginStationActiveIndex=0;
+  buttons.forEach((button,index)=>{
+    button.classList.toggle("active",index===jobOriginStationActiveIndex);
+    button.setAttribute("aria-selected",index===jobOriginStationActiveIndex?"true":"false");
+  });
+  buttons[jobOriginStationActiveIndex].scrollIntoView({block:"nearest"});
+  return true;
+}
+function resolveOriginStationSelection_(){
+  const input=String($("jobOriginStation")?.value||"").trim();
+  if(!input)return null;
+  if(jobOriginStationSelection &&
+     normalizeStationLookup_(input)===normalizeStationLookup_(jobOriginStationSelection.name)){
+    return jobOriginStationSelection;
+  }
+  const exact=findStationCandidates_(input).filter(station=>
+    normalizeStationLookup_(station.n)===normalizeStationLookup_(input)
+  );
+  if(exact.length===1){
+    selectOriginStation_(exact[0]);
+    return jobOriginStationSelection;
+  }
+  renderStationCandidates_(input);
+  const message=$("jobOriginStationMessage");
+  if(message){
+    message.textContent=exact.length>1
+      ?"同じ駅名が複数あります。都道府県・住所を確認して候補から選択してください。"
+      :"候補から起点駅を選択してください。";
+    message.classList.remove("selected");
+  }
+  $("jobOriginStation")?.focus();
+  return null;
+}
+
 function fillJobSearchFilters(){
   const companies=[...new Set(jobSearchItems.map(x=>String(x.sourceCompany||"").trim()).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,"ja"));
@@ -1090,9 +1236,10 @@ function fillJobSearchFilters(){
 function updateJobRangeLabels(){
   const d=Number($("jobDistanceRange").value);
   const origin=String($("jobOriginStation")?.value||"").trim();
+  const originLabel=jobOriginStationSelection?`${jobOriginStationSelection.name}駅`:origin;
   $("jobDistanceValue").textContent=origin?`${d}分以内`:"指定なし";
   if($("jobOriginStationLabel")){
-    $("jobOriginStationLabel").textContent=origin||"起点駅";
+    $("jobOriginStationLabel").textContent=originLabel||"起点駅";
   }
 
   let lo=Number($("jobPayMin").value);
@@ -1119,6 +1266,13 @@ function resetJobSearch(){
 
   $("jobKeywordFilter").value="";
   if($("jobOriginStation"))$("jobOriginStation").value="";
+  jobOriginStationSelection=null;
+  closeStationCandidates_();
+  const stationMessage=$("jobOriginStationMessage");
+  if(stationMessage){
+    stationMessage.textContent="駅名を入力し、都道府県・住所を確認して候補から選択してください。";
+    stationMessage.classList.remove("selected");
+  }
   $("jobDistanceRange").value=60;
   jobStationCommuteMap={};
   jobStationSearchApplied=false;
@@ -1137,9 +1291,14 @@ function resetJobSearch(){
 }
 async function runStationAwareJobSearch_(){
   const origin=String($("jobOriginStation")?.value||"").trim();
+  if(origin&&!resolveOriginStationSelection_())return;
+  const selectedOrigin=jobOriginStationSelection;
+  const originDisplay=selectedOrigin
+    ? `${selectedOrigin.name}駅（${selectedOrigin.prefecture}）`
+    : origin;
   jobStationSearchApplied=false;
   jobStationCommuteMap={};
-  jobStationSearchOrigin=origin;
+  jobStationSearchOrigin=originDisplay;
   jobStationApiUnavailable=false;
 
   renderJobSearchResults();
@@ -1165,19 +1324,20 @@ async function runStationAwareJobSearch_(){
   let failedBatchCount=0;
   jobStationCommuteMap={};
 
-  showWcLoading_(`${origin}からの通勤時間を確認中…`);
+  showWcLoading_(`${originDisplay}からの通勤時間を確認中…`);
 
   try{
     for(let index=0;index<batches.length;index++){
       const batch=batches[index];
 
       updateWcLoadingText_?.(
-        `${origin}からの通勤時間を確認中… ${index+1}/${batches.length}`
+        `${originDisplay}からの通勤時間を確認中… ${index+1}/${batches.length}`
       );
 
       try{
         const result=await apiPost("stationJobCommutes",{
-          station:origin,
+          station:originDisplay,
+          stationData:selectedOrigin,
           rowNumbers:batch.map(job=>Number(job.rowNumber))
         });
 
@@ -1448,7 +1608,9 @@ function renderJobSearchResults(){
   const min=Number($("jobPayMin")?.value||(jobPayUnit==="hourly"?1000:10000));
   const max=Number($("jobPayMax")?.value||(jobPayUnit==="hourly"?5000:50000));
   const maxMinutes=Number($("jobDistanceRange")?.value||60);
-  const originStation=String($("jobOriginStation")?.value||"").trim();
+  const originStation=jobOriginStationSelection
+    ? `${jobOriginStationSelection.name}駅`
+    : String($("jobOriginStation")?.value||"").trim();
   const includeTravel=$("jobTravelFilter")?.checked===true;
   const remoteMode=$("jobRemoteFilter")?.value||"exclude";
   const dateFrom=$("jobSpotDateFrom")?.value||"";
@@ -1565,6 +1727,8 @@ let jobSearchCurrentItems=[];
 let jobStationCommuteMap={};
 let jobStationSearchApplied=false;
 let jobStationSearchOrigin="";
+let jobOriginStationSelection=null;
+let jobOriginStationActiveIndex=-1;
 let jobStationApiUnavailable=false;
 let jobPayUnit="daily";
 

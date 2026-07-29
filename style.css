@@ -2483,3 +2483,30 @@ header.app-header{
   font-size:12px!important;
   font-weight:800!important;
 }
+
+/* WC-7.33.8 全国駅マスタ同梱・同名駅候補 */
+.station-autocomplete{position:relative!important}
+.station-candidates{
+  position:absolute;z-index:1400;top:calc(100% + 6px);left:0;right:0;
+  max-height:330px;overflow:auto;padding:6px;border:1px solid #cbd8e7;
+  border-radius:14px;background:#fff;box-shadow:0 16px 36px rgba(30,53,83,.18)
+}
+.station-candidate{
+  display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;
+  gap:3px 10px!important;width:100%!important;min-height:62px!important;
+  padding:10px 11px!important;border:0!important;border-radius:10px!important;
+  background:#fff!important;color:#1d2b42!important;text-align:left!important;box-shadow:none!important
+}
+.station-candidate:hover,.station-candidate.active{background:#edf5ff!important}
+.station-candidate-main{font-size:15px;font-weight:900}
+.station-candidate-pref{
+  align-self:center;padding:3px 7px;border-radius:999px;background:#eaf3ff;
+  color:#0f55a5;font-size:11px;font-weight:900
+}
+.station-candidate-address{
+  grid-column:1/-1;overflow:hidden;color:#6a788c;font-size:11px;font-weight:600;
+  text-overflow:ellipsis;white-space:nowrap
+}
+.station-candidate-empty{padding:16px 12px;color:#6a788c;font-size:13px;text-align:center}
+#jobOriginStationMessage.selected{color:#087563!important;font-weight:800!important}
+@media(max-width:700px){.station-candidates{max-height:280px}.station-candidate{min-height:60px!important}}

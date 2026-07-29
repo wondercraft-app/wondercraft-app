@@ -1,10 +1,11 @@
-const CACHE="wondercraft-wc-7-33-7-strict-commute";
+const CACHE="wondercraft-wc-7-33-8-station-master";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.7-strict-commute",
-  "./config.js?v=7.33.7-strict-commute",
-  "./app.js?v=7.33.7-strict-commute",
+  "./style.css?v=7.33.8-station-master",
+  "./config.js?v=7.33.8-station-master",
+  "./app.js?v=7.33.8-station-master",
+  "./stations-data.js?v=7.33.8-station-master",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",

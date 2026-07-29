@@ -239,7 +239,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.33.7-strict-commute">
+  <link rel="stylesheet" href="./style.css?v=7.33.8-station-master">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -253,7 +253,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.33.7</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.33.8</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -409,9 +409,14 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
               </select>
             </label>
             <label class="job-origin-station-field">起点駅
-              <input id="jobOriginStation" type="search" inputmode="search"
-                placeholder="例：名古屋駅">
-              <small>駅名を入力した場合だけ、片道時間で絞り込みます。</small>
+              <div class="station-autocomplete">
+                <input id="jobOriginStation" type="search" inputmode="search"
+                  placeholder="例：名古屋駅" autocomplete="off"
+                  aria-autocomplete="list" aria-controls="jobOriginStationCandidates">
+                <div id="jobOriginStationCandidates" class="station-candidates"
+                  role="listbox" hidden></div>
+              </div>
+              <small id="jobOriginStationMessage">駅名を入力し、都道府県・住所を確認して候補から選択してください。</small>
             </label>
             <label class="job-commute-range-field">
               <span><strong id="jobOriginStationLabel">起点駅</strong>から片道 <strong id="jobDistanceValue">指定なし</strong></span>
@@ -489,7 +494,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <article class="notice-card">
           <header><h2>お知らせ</h2></header>
           <div class="notice-list">
-            <p><time>2026/07/27</time> WC-7.33.7 案件検索条件を調整しました。</p>
+            <p><time>2026/07/27</time> WC-7.33.8 案件検索条件を調整しました。</p>
             <p><time>2026/07/26</time> 社員登録・管理者承認に対応しました。</p>
           </div>
         </article>
@@ -614,8 +619,9 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.33.7-strict-commute"></script>
-  <script src="./app.js?v=7.33.7-strict-commute"></script>
+  <script src="./config.js?v=7.33.8-station-master"></script>
+  <script src="./stations-data.js?v=7.33.8-station-master"></script>
+  <script src="./app.js?v=7.33.8-station-master"></script>
 
 </body>
 </html>
