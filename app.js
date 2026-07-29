@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.33.3 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.33.4 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.3";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.4";
     }
 
     await initialize();
@@ -1216,13 +1216,13 @@ async function runStationAwareJobSearch_(){
       const box=$("jobSearchResults");
       box?.insertAdjacentHTML(
         "afterbegin",
-        `<div class="job-search-notice compact">一部の通勤時間を取得できませんでした。取得できた案件を表示しています。</div>`
+        `<div class="job-search-notice compact">一部の案件は店舗未定または経路未取得のため、通勤時間要確認として表示しています。</div>`
       );
     }else if(successCount===0){
       const box=$("jobSearchResults");
       box?.insertAdjacentHTML(
         "afterbegin",
-        `<div class="job-search-notice compact">通勤時間を取得できる案件がありませんでした。勤務地の記載を確認してください。</div>`
+        `<div class="job-search-notice compact">店舗未定または勤務地不明の案件は、通勤時間要確認として表示しています。</div>`
       );
     }
   }catch(error){
@@ -1280,6 +1280,38 @@ function getJobRegion_(x){
   return WC_JOB_REGION_MAP[area]?area:"";
 }
 
+function getValidJobCommuteMinutes_(routeInfo){
+  if(!routeInfo)return null;
+  const minutes=Number(routeInfo.minutes);
+  return Number.isFinite(minutes)&&minutes>0?minutes:null;
+}
+
+function isNearestSelectionJob_(job){
+  const text=normalizeJobText([
+    job?.shopName,
+    job?.area,
+    job?.prefecture,
+    job?.originalText,
+    job?.remarks
+  ].join(" "));
+  return [
+    "最寄りから選定",
+    "最寄駅から選定",
+    "最寄り駅から選定",
+    "店舗未定",
+    "店舗不明",
+    "勤務地未定",
+    "勤務地要確認"
+  ].some(word=>text.includes(normalizeJobText(word)));
+}
+
+function getJobDisplayName_(job){
+  const name=String(job?.shopName||"").trim();
+  if(name&&name!=="案件名未設定")return name;
+  if(isNearestSelectionJob_(job))return "最寄りから選定（店舗未定）";
+  return "案件名未設定";
+}
+
 function renderJobSearchResults(){
   if(!jobSearchLoaded)return;
 
@@ -1303,8 +1335,8 @@ function renderJobSearchResults(){
     const pay=extractJobPay(x.price);
     const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
-      ? (routeInfo&&Number.isFinite(Number(routeInfo.minutes))?Number(routeInfo.minutes):null)
-      : getJobCommuteMinutes_(x);
+      ? getValidJobCommuteMinutes_(routeInfo)
+      : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
     const jobRegion=getJobRegion_(x);
     const travel=isTravelJob_(x);
     const spot=isSpotJob_(x);
@@ -1317,9 +1349,11 @@ function renderJobSearchResults(){
     const regionOk=!region||jobRegion===region;
     const areaOk=!area||(area===region?jobRegion===region:String(x.prefecture||"").trim()===area);
     const travelOk=includeTravel||!travel;
+    // 経路を取得できた案件だけ分数条件を適用する。
+    // 店舗未定・最寄りから選定・勤務地不明は除外せず「要確認」で残す。
     const commuteOk=!originStation
       ? true
-      : (!jobStationSearchApplied ? true : (commute!==null&&commute<=maxMinutes));
+      : (!jobStationSearchApplied || commute===null || commute<=maxMinutes);
     const payOk=!pay||(pay>=min&&pay<=max);
 
     return modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&commuteOk&&payOk&&
@@ -1342,8 +1376,8 @@ function renderJobSearchResults(){
   box.innerHTML=items.slice(0,20).map(x=>{
     const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
-      ? (routeInfo&&Number.isFinite(Number(routeInfo.minutes))?Number(routeInfo.minutes):null)
-      : getJobCommuteMinutes_(x);
+      ? getValidJobCommuteMinutes_(routeInfo)
+      : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
     const spot=isSpotJob_(x);
     const remote=isRemoteJob_(x);
     const travel=isTravelJob_(x);
@@ -1352,12 +1386,12 @@ function renderJobSearchResults(){
       <div class="job-card-main">
         <div class="job-card-title-row">
           <span class="job-kind-badge ${spot?'spot':'long'}">${spot?'スポット':'長期案件'}</span>
-          <h3>${esc(x.shopName||"案件名未設定")}</h3>
+          <h3>${esc(getJobDisplayName_(x))}</h3>
         </div>
         <div class="job-card-meta">
           <span>📍 ${esc(x.prefecture||x.area||"勤務地要確認")}</span>
           ${date?`<span>📅 ${esc(date)}</span>`:""}
-          ${commute!==null?`<span>🚃 約${commute}分</span>`:""}
+          ${commute!==null?`<span>🚃 約${commute}分</span>`:(originStation&&jobStationSearchApplied?`<span class="job-commute-pending">🚃 通勤時間要確認</span>`:"")}
           <span>💴 ${esc(x.price||"単価要確認")}</span>
           ${formatJobConvertedPay_(x.price)?`<span class="job-pay-converted">${esc(formatJobConvertedPay_(x.price))}</span>`:""}
         </div>

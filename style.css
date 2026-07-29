@@ -2463,3 +2463,13 @@ header.app-header{
   font-size:12px!important;
   line-height:1.45!important;
 }
+
+/* WC-7.33.4 店舗未定・最寄りから選定対応 */
+.job-commute-pending{
+  color:#8a6410!important;
+  background:#fff7df!important;
+  border-radius:999px!important;
+  padding:3px 8px!important;
+  font-size:12px!important;
+  font-weight:800!important;
+}

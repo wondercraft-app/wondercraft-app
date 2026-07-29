@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-7-33-3-commute-batches";
+const CACHE="wondercraft-wc-7-33-4-unknown-location";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.3-commute-batches",
-  "./config.js?v=7.33.3-commute-batches",
-  "./app.js?v=7.33.3-commute-batches",
+  "./style.css?v=7.33.4-unknown-location",
+  "./config.js?v=7.33.4-unknown-location",
+  "./app.js?v=7.33.4-unknown-location",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",
