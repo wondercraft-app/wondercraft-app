@@ -239,7 +239,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.32.7-station-origin">
+  <link rel="stylesheet" href="./style.css?v=7.32.9-search-ui-refresh">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -253,7 +253,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.32.7</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.32.9</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -370,7 +370,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <section id="jobSearchSection" class="job-search-section" hidden>
         <section class="matching-hero job-search-hero">
           <p class="eyebrow">JOB SEARCH</p>
-          <h1>案件検索</h1>
+          <div class="job-hero-title"><span class="job-hero-icon">⌕</span><h1>案件検索</h1></div>
           <p>希望条件を設定して、マッチング以外の案件を自由に検索できます。</p>
         </section>
         <div class="job-search-mode-tabs">
@@ -379,7 +379,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         </div>
         <div class="job-search-layout">
           <aside class="job-filter-panel">
-            <div class="job-filter-title"><h2>希望条件</h2><button id="resetJobSearchBtn" class="secondary" type="button">条件をリセット</button></div>
+            <div class="job-filter-title"><div><h2>希望条件</h2><p>必要な条件だけ設定して検索してください。</p></div><button id="resetJobSearchBtn" class="secondary" type="button">条件をリセット</button></div>
             <label>エリア
               <select id="jobRegionFilter">
                 <option value="">すべて</option>
@@ -411,7 +411,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
             <label class="job-origin-station-field">起点駅
               <input id="jobOriginStation" type="search" inputmode="search"
                 placeholder="例：深井駅、名古屋駅">
-              <small>入力した駅から案件勤務地までの片道時間を検索します。</small>
+              <small>駅名を入力した場合だけ、片道時間で絞り込みます。</small>
             </label>
             <label class="job-commute-range-field">
               <span><strong id="jobOriginStationLabel">起点駅</strong>から片道 <strong id="jobDistanceValue">指定なし</strong></span>
@@ -442,10 +442,10 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
             <label>提案元会社<select id="jobCompanyFilter"><option value="">すべて</option></select></label>
             <label>経験条件<select id="jobBeginnerFilter"><option value="">指定なし</option><option value="可">未経験可</option><option value="不可">経験者のみ</option></select></label>
             <label>キーワード<input id="jobKeywordFilter" type="search" placeholder="案件名・店舗・備考など"></label>
-            <button id="runJobSearchBtn" class="primary" type="button">この条件で検索する</button>
+            <button id="runJobSearchBtn" class="primary" type="button"><span class="job-search-button-icon">⌕</span><span>この条件で検索する</span></button>
           </aside>
           <section class="job-result-panel">
-            <div class="job-result-head"><div><h2>検索結果</h2><p id="jobResultModeNote" class="job-result-note">スポット案件は表示していません。</p></div><span id="jobResultCount" class="result-count">0件</span></div>
+            <div class="job-result-head"><div><div><span class="job-section-kicker">SEARCH RESULTS</span><h2>検索結果</h2></div><p id="jobResultModeNote" class="job-result-note">スポット案件は表示していません。</p></div><span id="jobResultCount" class="result-count">0件</span></div>
             <div class="job-result-tools"><label>並び替え<select id="jobSort"><option value="new">更新日が新しい順</option><option value="payHigh">単価が高い順</option><option value="name">案件名順</option></select></label></div>
             <div id="jobSearchResults" class="job-search-results"></div>
           </section>
@@ -482,7 +482,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <article class="notice-card">
           <header><h2>お知らせ</h2></header>
           <div class="notice-list">
-            <p><time>2026/07/27</time> WC-7.32.7 案件検索条件を調整しました。</p>
+            <p><time>2026/07/27</time> WC-7.32.9 案件検索条件を調整しました。</p>
             <p><time>2026/07/26</time> 社員登録・管理者承認に対応しました。</p>
           </div>
         </article>
@@ -607,8 +607,8 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.32.7-station-origin"></script>
-  <script src="./app.js?v=7.32.7-station-origin"></script>
+  <script src="./config.js?v=7.32.9-search-ui-refresh"></script>
+  <script src="./app.js?v=7.32.9-search-ui-refresh"></script>
 
 </body>
 </html>

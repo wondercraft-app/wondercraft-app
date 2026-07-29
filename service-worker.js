@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-7-32-7-station-origin";
+const CACHE="wondercraft-wc-7-32-9-search-ui-refresh";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.32.7-station-origin",
-  "./config.js?v=7.32.7-station-origin",
-  "./app.js?v=7.32.7-station-origin",
+  "./style.css?v=7.32.9-search-ui-refresh",
+  "./config.js?v=7.32.9-search-ui-refresh",
+  "./app.js?v=7.32.9-search-ui-refresh",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",

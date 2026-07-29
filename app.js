@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.32.7 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.32.9 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.32.7";
+      $("appVersion").textContent=config.VERSION||"WC-7.32.9";
     }
 
     await initialize();
@@ -1074,6 +1074,7 @@ function resetJobSearch(){
   jobStationCommuteMap={};
   jobStationSearchApplied=false;
   jobStationSearchOrigin="";
+  jobStationApiUnavailable=false;
   $("jobPayMin").value=10000;
   $("jobPayMax").value=50000;
   if($("jobTravelFilter"))$("jobTravelFilter").checked=false;
@@ -1091,6 +1092,7 @@ async function runStationAwareJobSearch_(){
   jobStationSearchApplied=false;
   jobStationCommuteMap={};
   jobStationSearchOrigin=origin;
+  jobStationApiUnavailable=false;
 
   renderJobSearchResults();
 
@@ -1122,11 +1124,21 @@ async function runStationAwareJobSearch_(){
   }catch(error){
     jobStationSearchApplied=false;
     jobStationCommuteMap={};
+    const message=String(error?.message||"");
+    jobStationApiUnavailable=/未対応のAPI action|stationJobCommutes/i.test(message);
+
+    // 通勤時間APIが未反映でも、その他の条件検索は止めない。
+    renderJobSearchResults();
+
     const box=$("jobSearchResults");
     if(box){
+      const notice=jobStationApiUnavailable
+        ? "通勤時間連携がまだGASに反映されていないため、駅からの時間以外の条件で検索結果を表示しています。"
+        : `駅からの通勤時間だけ取得できませんでした。その他の条件では検索できています。${message ? "（"+esc(message)+"）" : ""}`;
+
       box.insertAdjacentHTML(
         "afterbegin",
-        `<div class="error">駅からの通勤時間を取得できませんでした。${esc(error?.message||"")}</div>`
+        `<div class="job-search-notice">${notice}</div>`
       );
     }
   }finally{
@@ -1264,6 +1276,7 @@ let jobSearchCurrentItems=[];
 let jobStationCommuteMap={};
 let jobStationSearchApplied=false;
 let jobStationSearchOrigin="";
+let jobStationApiUnavailable=false;
 
 
 function setJobSearchMode_(mode){
