@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.33.8 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.33.9 - 店舗未定案件は起点駅と同一都道府県のみ */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.8";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.9";
     }
 
     await initialize();
@@ -149,7 +149,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.31.7-loader-css-fix",
+      "./service-worker.js?v=7.33.10-force-same-prefecture",
       { updateViaCache:"none" }
     );
 
@@ -1376,13 +1376,13 @@ async function runStationAwareJobSearch_(){
       const box=$("jobSearchResults");
       box?.insertAdjacentHTML(
         "afterbegin",
-        `<div class="job-search-notice compact">通勤時間内の案件、最寄り駅から選定する案件、案件文言から通勤圏内と判断できる候補を表示しています。</div>`
+        `<div class="job-search-notice compact">通勤時間内の案件と、起点駅と同一都道府県の「最寄り駅から選定」案件を表示しています。</div>`
       );
     }else if(successCount===0){
       const box=$("jobSearchResults");
       box?.insertAdjacentHTML(
         "afterbegin",
-        `<div class="job-search-notice compact">通勤時間を取得できませんでした。最寄り駅から店舗を選定する案件のみ表示しています。</div>`
+        `<div class="job-search-notice compact">通勤時間を取得できませんでした。起点駅と同一都道府県の「最寄り駅から選定」案件のみ表示しています。</div>`
       );
     }
   }catch(error){
@@ -1444,6 +1444,43 @@ function getValidJobCommuteMinutes_(routeInfo){
   if(!routeInfo)return null;
   const minutes=Number(routeInfo.minutes);
   return Number.isFinite(minutes)&&minutes>0?minutes:null;
+}
+
+function normalizePrefectureForJobSearch_(value){
+  const text=String(value||"").normalize("NFKC").replace(/[\s　]/g,"");
+  if(!text)return "";
+
+  const prefectures=[
+    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+    "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県",
+    "静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県",
+    "奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県",
+    "徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県",
+    "熊本県","大分県","宮崎県","鹿児島県","沖縄県"
+  ];
+
+  const exact=prefectures.find(pref=>text===pref);
+  if(exact)return exact;
+
+  const contained=prefectures.filter(pref=>text.includes(pref));
+  return contained.length===1?contained[0]:"";
+}
+
+function getJobPrefectureForStationSearch_(job){
+  const direct=normalizePrefectureForJobSearch_(job?.prefecture);
+  if(direct)return direct;
+
+  const text=[
+    job?.area,job?.shopName,job?.originalText,job?.remarks,job?.location
+  ].join(" ");
+  return normalizePrefectureForJobSearch_(text);
+}
+
+function isSamePrefectureAsSelectedOrigin_(job){
+  const originPref=normalizePrefectureForJobSearch_(jobOriginStationSelection?.prefecture);
+  const jobPref=getJobPrefectureForStationSearch_(job);
+  return !!originPref&&!!jobPref&&originPref===jobPref;
 }
 
 function isNearestSelectionJob_(job){
@@ -1644,8 +1681,23 @@ function renderJobSearchResults(){
 
     // 実測時間がある場合は時間だけで厳密判定する。
     // 149分など上限超過は、文言候補があっても除外する。
-    // 実測できない場合のみ、起点地域と矛盾しない
-    // 「最寄りから選定」または具体的地名候補を残す。
+    // 実測できない場合は、起点駅と案件が同一都道府県であることを必須にする。
+    // そのうえで「最寄りから選定」または具体的地名候補だけを残す。
+    // WC-7.33.10: 店舗未定・最寄り駅から選定案件は、実測値がない場合、
+    // 起点駅と案件の都道府県が完全一致しなければ必ず除外する。
+    const isUndecidedLocationJob=isNearestSelectionJob_(x);
+    const samePrefecture=isSamePrefectureAsSelectedOrigin_(x);
+    const forceExcludeUndecidedOtherPrefecture=
+      !!originStation &&
+      jobStationSearchApplied &&
+      commute===null &&
+      isUndecidedLocationJob &&
+      !samePrefecture;
+
+    if(forceExcludeUndecidedOtherPrefecture){
+      return false;
+    }
+
     const commuteOk=!originStation
       ? true
       : (
@@ -1655,8 +1707,9 @@ function renderJobSearchResults(){
                 commute!==null
                   ? commute<=maxMinutes
                   : (
+                      samePrefecture &&
                       areaCompatible &&
-                      (isNearestSelectionJob_(x) || !!textCandidateReason)
+                      (isUndecidedLocationJob || !!textCandidateReason)
                     )
               )
         );

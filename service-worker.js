@@ -1,11 +1,11 @@
-const CACHE="wondercraft-wc-7-33-8-station-master";
+const CACHE="wondercraft-wc-7-33-10-force-same-prefecture";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.8-station-master",
-  "./config.js?v=7.33.8-station-master",
-  "./app.js?v=7.33.8-station-master",
-  "./stations-data.js?v=7.33.8-station-master",
+  "./style.css?v=7.33.10-force-same-prefecture",
+  "./config.js?v=7.33.10-force-same-prefecture",
+  "./app.js?v=7.33.10-force-same-prefecture",
+  "./stations-data.js?v=7.33.10-force-same-prefecture",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",
