@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.33.6 - 認証・権限基盤 */
+/* WonderCraft PWA WC-7.33.7 - 認証・権限基盤 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.6";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.7";
     }
 
     await initialize();
@@ -1311,11 +1311,29 @@ function normalizeStationNameForCandidate_(value){
     .replace(/\s+/g,"");
 }
 
-function getJobTextCandidateReason_(job,originStation,maxMinutes){
+function getOriginAreaRule_(originStation){
   const origin=normalizeStationNameForCandidate_(originStation);
-  if(!origin)return "";
 
-  const text=normalizeJobText([
+  const rules={
+    "名古屋":{
+      prefectures:["愛知県"],
+      broadAreas:["名古屋市","尾張","愛知"],
+      localWords:[
+        "名古屋市","名駅","名古屋駅","栄","金山","伏見","丸の内","大曽根",
+        "千種","今池","本山","星ヶ丘","藤が丘","八事","新瑞橋","名古屋港",
+        "中区","中村区","東区","西区","北区","昭和区","瑞穂区",
+        "熱田区","中川区","港区","南区","守山区","緑区","名東区","天白区",
+        "清須","北名古屋","春日井","小牧","一宮","稲沢","岩倉","日進",
+        "長久手","豊明","大府","刈谷","東海市"
+      ]
+    }
+  };
+
+  return rules[origin]||null;
+}
+
+function getJobAllSearchText_(job){
+  return normalizeJobText([
     job?.shopName,
     job?.prefecture,
     job?.area,
@@ -1324,10 +1342,69 @@ function getJobTextCandidateReason_(job,originStation,maxMinutes){
     job?.location,
     job?.nearestStation
   ].join(" "));
+}
 
+function hasConflictingPrefecture_(job,originStation){
+  const rule=getOriginAreaRule_(originStation);
+  if(!rule)return false;
+
+  const text=getJobAllSearchText_(job);
+  const allPrefs=[
+    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+    "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県",
+    "静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県",
+    "奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県",
+    "徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県",
+    "熊本県","大分県","宮崎県","鹿児島県","沖縄県"
+  ];
+
+  const found=allPrefs.filter(pref=>text.includes(normalizeJobText(pref)));
+  if(!found.length)return false;
+
+  return found.some(pref=>!rule.prefectures.includes(pref));
+}
+
+function isOriginAreaCompatible_(job,originStation){
+  if(hasConflictingPrefecture_(job,originStation))return false;
+
+  const rule=getOriginAreaRule_(originStation);
+  if(!rule)return true;
+
+  const text=getJobAllSearchText_(job);
+
+  // 都道府県が明記されていれば起点県のみ許可
+  const hasAnyPrefecture=[
+    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+    "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県",
+    "静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県",
+    "奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県",
+    "徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県",
+    "熊本県","大分県","宮崎県","鹿児島県","沖縄県"
+  ].some(pref=>text.includes(normalizeJobText(pref)));
+
+  if(hasAnyPrefecture){
+    return rule.prefectures.some(pref=>text.includes(normalizeJobText(pref)));
+  }
+
+  // 県名がない案件は、具体的な起点周辺地名があるか、店舗未定系のみ許可
+  return rule.localWords.some(word=>text.includes(normalizeJobText(word))) ||
+         isNearestSelectionJob_(job);
+}
+
+function getJobTextCandidateReason_(job,originStation,maxMinutes){
+  const origin=normalizeStationNameForCandidate_(originStation);
+  if(!origin)return "";
+
+  if(!isOriginAreaCompatible_(job,originStation))return "";
+
+  const text=getJobAllSearchText_(job);
   if(!text)return "";
 
-  // 起点駅そのもの、または「○○駅周辺・近郊・市内」などが書かれている
+  const rule=getOriginAreaRule_(originStation);
+
+  // 起点駅そのもの、または周辺表現
   const directWords=[
     origin+"駅",
     origin+"周辺",
@@ -1339,42 +1416,18 @@ function getJobTextCandidateReason_(job,originStation,maxMinutes){
     return "起点駅周辺の記載あり";
   }
 
-  // 文中に明示された通勤時間条件
-  const minuteMatches=[
-    /(?:通勤|片道|所要時間)[^\d]{0,8}(\d{1,3})分(?:以内|圏内)?/,
-    /(\d{1,3})分(?:以内|圏内)[^\n]{0,10}(?:通勤|片道|所要時間)?/,
-    /(?:1時間|一時間)(?:以内|圏内)/
-  ];
-
-  for(const pattern of minuteMatches){
-    const match=text.match(pattern);
-    if(!match)continue;
-
-    const statedMinutes=match[1] ? Number(match[1]) : 60;
-    if(Number.isFinite(statedMinutes) && statedMinutes<=Number(maxMinutes||60)){
-      return `${statedMinutes}分圏内の記載あり`;
+  // 名古屋起点など、具体的な周辺地名だけ候補にする
+  if(rule){
+    const hit=rule.localWords.find(word=>text.includes(normalizeJobText(word)));
+    if(hit){
+      return `${hit}の記載あり`;
     }
   }
 
-  // 名古屋起点で候補にできる具体地名
-  // 広すぎる「愛知県内」「東海全域」だけでは候補にしない
-  const localCandidateMap={
-    "名古屋":[
-      "名古屋市","名駅","栄","金山","伏見","丸の内","大曽根","千種",
-      "今池","本山","星ヶ丘","藤が丘","八事","新瑞橋","名古屋港",
-      "中区","中村区","東区","西区","北区","昭和区","瑞穂区",
-      "熱田区","中川区","港区","南区","守山区","緑区","名東区","天白区"
-    ]
-  };
-
-  const words=localCandidateMap[origin]||[];
-  const hit=words.find(word=>text.includes(normalizeJobText(word)));
-  if(hit){
-    return `${hit}の記載あり`;
-  }
-
+  // 「60分圏内」だけの一般文言は起点との関連が不明なため採用しない
   return "";
 }
+
 
 function getJobDisplayName_(job){
   const name=String(job?.shopName||"").trim();
@@ -1425,15 +1478,24 @@ function renderJobSearchResults(){
     // 2. 「最寄りから選定」「店舗未定」など勤務地を後決めする案件
     // だけを残す。未確認の全案件は表示しない。
     const textCandidateReason=getJobTextCandidateReason_(x,originStation,maxMinutes);
+    const areaCompatible=isOriginAreaCompatible_(x,originStation);
+
+    // 実測時間がある場合は時間だけで厳密判定する。
+    // 149分など上限超過は、文言候補があっても除外する。
+    // 実測できない場合のみ、起点地域と矛盾しない
+    // 「最寄りから選定」または具体的地名候補を残す。
     const commuteOk=!originStation
       ? true
       : (
           !jobStationSearchApplied
             ? true
             : (
-                (commute!==null && commute<=maxMinutes) ||
-                isNearestSelectionJob_(x) ||
-                !!textCandidateReason
+                commute!==null
+                  ? commute<=maxMinutes
+                  : (
+                      areaCompatible &&
+                      (isNearestSelectionJob_(x) || !!textCandidateReason)
+                    )
               )
         );
     const payOk=!pay||(pay>=min&&pay<=max);
@@ -1461,6 +1523,7 @@ function renderJobSearchResults(){
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
     const textCandidateReason=getJobTextCandidateReason_(x,originStation,maxMinutes);
+    const areaCompatible=isOriginAreaCompatible_(x,originStation);
     const spot=isSpotJob_(x);
     const remote=isRemoteJob_(x);
     const travel=isTravelJob_(x);
@@ -1476,9 +1539,9 @@ function renderJobSearchResults(){
           ${date?`<span>📅 ${esc(date)}</span>`:""}
           ${commute!==null
             ? `<span>🚃 約${commute}分</span>`
-            : (originStation&&jobStationSearchApplied&&isNearestSelectionJob_(x)
+            : (originStation&&jobStationSearchApplied&&areaCompatible&&isNearestSelectionJob_(x)
                 ? `<span class="job-commute-pending">🚃 最寄り駅から選定</span>`
-                : (originStation&&jobStationSearchApplied&&textCandidateReason
+                : (originStation&&jobStationSearchApplied&&areaCompatible&&textCandidateReason
                     ? `<span class="job-text-candidate">📍 ${esc(textCandidateReason)}・候補</span>`
                     : ""))}
           <span>💴 ${esc(x.price||"単価要確認")}</span>

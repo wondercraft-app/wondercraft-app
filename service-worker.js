@@ -1,10 +1,10 @@
-const CACHE="wondercraft-wc-7-33-6-text-candidate";
+const CACHE="wondercraft-wc-7-33-7-strict-commute";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.6-text-candidate",
-  "./config.js?v=7.33.6-text-candidate",
-  "./app.js?v=7.33.6-text-candidate",
+  "./style.css?v=7.33.7-strict-commute",
+  "./config.js?v=7.33.7-strict-commute",
+  "./app.js?v=7.33.7-strict-commute",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",
