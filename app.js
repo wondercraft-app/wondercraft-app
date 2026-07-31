@@ -149,7 +149,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.33.11-matching-timeout-fix",
+      "./service-worker.js?v=7.33.15-candidate-autocomplete",
       { updateViaCache:"none" }
     );
 
@@ -278,6 +278,17 @@ function bindEvents(){
   $("editForm")?.addEventListener("submit",saveEdit);
   $("openSkillSheetBtn")?.addEventListener("click",openSkillSheet);
   $("runMatchingBtn")?.addEventListener("click",runCandidateMatching);
+  $("matchingCandidateSearch")?.addEventListener("input",e=>{
+    const hidden=$("matchingCandidateSelect");
+    if(hidden)hidden.value="";
+    renderMatchingCandidateOptions(e.target.value,true);
+  });
+  $("matchingCandidateSearch")?.addEventListener("focus",e=>renderMatchingCandidateOptions(e.target.value,true));
+  $("matchingCandidateSearch")?.addEventListener("keydown",handleMatchingCandidateKeydown_);
+  document.addEventListener("click",event=>{
+    const wrap=document.querySelector(".matching-candidate-autocomplete");
+    if(wrap&&!wrap.contains(event.target))closeMatchingCandidateSuggestions_();
+  });
   $("runJobSearchBtn")?.addEventListener("click",runStationAwareJobSearch_);
   $("resetJobSearchBtn")?.addEventListener("click",resetJobSearch);
   ["jobDistanceRange","jobPayMin","jobPayMax"].forEach(id=>$(id)?.addEventListener("input",updateJobRangeLabels));
@@ -1927,22 +1938,98 @@ let matchingCandidateItems=[];
 let matchingJobItems=[];
 let matchingMode="candidate";
 
+let matchingCandidateActiveIndex=-1;
+
 async function loadMatchingCandidatesOnce(){
   if(matchingCandidatesLoaded)return;
-  const select=$("matchingCandidateSelect"),summary=$("matchingSummary");
-  if(!select)return;
-  select.disabled=true; select.innerHTML='<option value="">求職者を読み込み中...</option>';
+  const input=$("matchingCandidateSearch"),summary=$("matchingSummary");
+  if(!input)return;
+  input.disabled=true;
+  input.placeholder="求職者を読み込み中...";
   try{
     const items=await apiGet("matchingCandidates");
     matchingCandidateItems=Array.isArray(items)?items:[];
-    select.innerHTML='<option value="">求職者を選択</option>'+matchingCandidateItems.map((x,i)=>
-      `<option value="${i}">${esc(x.name||"")}｜${esc(x.prefecture||"")} ${esc(x.station||"")}｜${esc(x.experience||"")}</option>`).join("");
     matchingCandidatesLoaded=true;
+    input.placeholder="名前・都道府県・駅・経験を入力";
     if(summary)summary.textContent=`求職者 ${matchingCandidateItems.length}名を読み込みました。`;
   }catch(err){
-    select.innerHTML='<option value="">求職者を取得できませんでした</option>';
+    input.placeholder="求職者を取得できませんでした";
     if(summary)summary.textContent=err?.message||"求職者一覧を取得できませんでした。";
-  }finally{select.disabled=false;}
+  }finally{input.disabled=false;}
+}
+
+function matchingCandidateDisplayText_(x){
+  return [x.name||"",[x.prefecture||"",x.station||""].filter(Boolean).join(" "),x.experience||""].filter(Boolean).join("｜");
+}
+
+function closeMatchingCandidateSuggestions_(){
+  const box=$("matchingCandidateSuggestions"),input=$("matchingCandidateSearch");
+  if(box)box.hidden=true;
+  if(input)input.setAttribute("aria-expanded","false");
+  matchingCandidateActiveIndex=-1;
+}
+
+function selectMatchingCandidate_(index){
+  const candidate=matchingCandidateItems[Number(index)];
+  if(!candidate)return;
+  const hidden=$("matchingCandidateSelect"),input=$("matchingCandidateSearch");
+  if(hidden)hidden.value=String(index);
+  if(input)input.value=matchingCandidateDisplayText_(candidate);
+  closeMatchingCandidateSuggestions_();
+}
+
+function renderMatchingCandidateOptions(query,forceOpen=false){
+  const box=$("matchingCandidateSuggestions"),input=$("matchingCandidateSearch");
+  if(!box||!input)return;
+  const q=String(query||"").normalize("NFKC").toLowerCase().replace(/\s+/g,"").trim();
+  const filtered=matchingCandidateItems.map((x,i)=>({x,i})).filter(({x})=>{
+    if(!q)return true;
+    const text=[x.name,x.prefecture,x.station,x.experience,x.career,x.company].join(" ")
+      .normalize("NFKC").toLowerCase().replace(/\s+/g,"");
+    return text.includes(q);
+  }).slice(0,30);
+
+  if(!forceOpen){closeMatchingCandidateSuggestions_();return;}
+  matchingCandidateActiveIndex=-1;
+  if(!filtered.length){
+    box.innerHTML='<div class="matching-candidate-empty">該当する求職者がいません</div>';
+  }else{
+    box.innerHTML=filtered.map(({x,i},position)=>`
+      <button type="button" class="matching-candidate-option" role="option" data-candidate-index="${i}" data-position="${position}">
+        <strong>${esc(x.name||"")}</strong>
+        <span>${esc([x.prefecture||"",x.station||""].filter(Boolean).join(" "))}</span>
+        <small>${esc([x.experience||"",x.career||""].filter(Boolean).join("｜"))}</small>
+      </button>`).join("");
+    box.querySelectorAll(".matching-candidate-option").forEach(button=>{
+      button.addEventListener("mousedown",event=>event.preventDefault());
+      button.addEventListener("click",()=>selectMatchingCandidate_(button.dataset.candidateIndex));
+    });
+  }
+  box.hidden=false;
+  input.setAttribute("aria-expanded","true");
+}
+
+function handleMatchingCandidateKeydown_(event){
+  const box=$("matchingCandidateSuggestions");
+  if(!box||box.hidden)return;
+  const buttons=[...box.querySelectorAll(".matching-candidate-option")];
+  if(!buttons.length)return;
+  if(event.key==="ArrowDown"){
+    event.preventDefault();
+    matchingCandidateActiveIndex=Math.min(buttons.length-1,matchingCandidateActiveIndex+1);
+  }else if(event.key==="ArrowUp"){
+    event.preventDefault();
+    matchingCandidateActiveIndex=Math.max(0,matchingCandidateActiveIndex-1);
+  }else if(event.key==="Enter"&&matchingCandidateActiveIndex>=0){
+    event.preventDefault();
+    selectMatchingCandidate_(buttons[matchingCandidateActiveIndex].dataset.candidateIndex);
+    return;
+  }else if(event.key==="Escape"){
+    closeMatchingCandidateSuggestions_();
+    return;
+  }else{return;}
+  buttons.forEach((button,index)=>button.classList.toggle("active",index===matchingCandidateActiveIndex));
+  buttons[matchingCandidateActiveIndex]?.scrollIntoView({block:"nearest"});
 }
 
 async function loadMatchingJobsOnce(){

@@ -2510,3 +2510,27 @@ header.app-header{
 .station-candidate-empty{padding:16px 12px;color:#6a788c;font-size:13px;text-align:center}
 #jobOriginStationMessage.selected{color:#087563!important;font-weight:800!important}
 @media(max-width:700px){.station-candidates{max-height:280px}.station-candidate{min-height:60px!important}}
+
+.matching-controls input[type="search"]{background:#fff;}
+
+
+/* WC-7.33.15 求職者オートコンプリート */
+.matching-candidate-autocomplete{position:relative;display:block}
+.matching-candidate-input-wrap{position:relative}
+.matching-candidate-suggestions{
+  position:absolute;z-index:1600;top:calc(100% + 7px);left:0;right:0;
+  max-height:340px;overflow:auto;padding:6px;border:1px solid #cbd8e7;
+  border-radius:14px;background:#fff;box-shadow:0 18px 42px rgba(30,53,83,.20)
+}
+.matching-candidate-option{
+  display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;
+  gap:3px 12px!important;width:100%!important;min-height:62px!important;
+  padding:10px 12px!important;border:0!important;border-radius:10px!important;
+  background:#fff!important;color:#1d2b42!important;text-align:left!important;box-shadow:none!important
+}
+.matching-candidate-option:hover,.matching-candidate-option.active{background:#edf5ff!important}
+.matching-candidate-option strong{font-size:15px;font-weight:900}
+.matching-candidate-option span{align-self:center;color:#334a67;font-size:12px;font-weight:800}
+.matching-candidate-option small{grid-column:1/-1;color:#6a788c;font-size:11px;font-weight:700}
+.matching-candidate-empty{padding:16px 12px;color:#6a788c;font-size:13px;text-align:center}
+@media(max-width:700px){.matching-candidate-suggestions{max-height:300px}}

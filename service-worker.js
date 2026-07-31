@@ -1,11 +1,11 @@
-const CACHE="wondercraft-wc-7-33-10-force-same-prefecture";
+const CACHE="wondercraft-wc-7-33-15-candidate-autocomplete";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.11-matching-timeout-fix",
-  "./config.js?v=7.33.11-matching-timeout-fix",
-  "./app.js?v=7.33.11-matching-timeout-fix",
-  "./stations-data.js?v=7.33.11-matching-timeout-fix",
+  "./style.css?v=7.33.15-candidate-autocomplete",
+  "./config.js?v=7.33.15-candidate-autocomplete",
+  "./app.js?v=7.33.15-candidate-autocomplete",
+  "./stations-data.js?v=7.33.15-candidate-autocomplete",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",
