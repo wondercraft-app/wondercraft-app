@@ -1,11 +1,11 @@
-/* WonderCraft PWA WC-7.33.9 - 店舗未定案件は起点駅と同一都道府県のみ */
+/* WonderCraft PWA WC-7.33.11 - 案件マッチングタイムアウト対策 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
 let debounceTimer;
 let loadRequestId=0;
 
-const WC_API_TIMEOUT_MS = 15000;
+const WC_API_TIMEOUT_MS = 45000;
 const WC_STARTUP_VISIBLE_TIMEOUT_MS = 9000;
 
 async function wcFetchWithTimeout_(url, options={}){
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.9";
+      $("appVersion").textContent=config.VERSION||"WC-7.33.11";
     }
 
     await initialize();
@@ -149,7 +149,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.33.10-force-same-prefecture",
+      "./service-worker.js?v=7.33.11-matching-timeout-fix",
       { updateViaCache:"none" }
     );
 
@@ -1992,7 +1992,7 @@ async function runCandidateMatching(){
   const results=$("matchingResults"),summary=$("matchingSummary");
   results.innerHTML='<div class="loading">案件を比較中...</div>'; summary.textContent="";
   try{
-    const data=await apiPost("candidateJobMatches",{sheetName:c.sheetName,rowNumber:c.rowNumber});
+    const data=await apiPost("candidateJobMatches",{sheetName:c.sheetName,rowNumber:c.rowNumber,commuteCheckLimit:4});
     summary.textContent=`${data.candidate.name}さん｜全${data.totalJobs}件 → 条件絞込${data.filteredJobs ?? data.totalJobs}件 → 重複整理${data.dedupedJobs ?? data.filteredJobs ?? data.totalJobs}件｜おすすめ上位${(data.results||[]).length}件`;
     renderJobMatchResults(data.results||[]);
   }catch(err){
