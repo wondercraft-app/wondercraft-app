@@ -149,7 +149,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.33.14-candidate-search",
+      "./service-worker.js?v=7.33.11-matching-timeout-fix",
       { updateViaCache:"none" }
     );
 
@@ -278,7 +278,6 @@ function bindEvents(){
   $("editForm")?.addEventListener("submit",saveEdit);
   $("openSkillSheetBtn")?.addEventListener("click",openSkillSheet);
   $("runMatchingBtn")?.addEventListener("click",runCandidateMatching);
-  $("matchingCandidateSearch")?.addEventListener("input",e=>renderMatchingCandidateOptions(e.target.value));
   $("runJobSearchBtn")?.addEventListener("click",runStationAwareJobSearch_);
   $("resetJobSearchBtn")?.addEventListener("click",resetJobSearch);
   ["jobDistanceRange","jobPayMin","jobPayMax"].forEach(id=>$(id)?.addEventListener("input",updateJobRangeLabels));
@@ -1936,28 +1935,14 @@ async function loadMatchingCandidatesOnce(){
   try{
     const items=await apiGet("matchingCandidates");
     matchingCandidateItems=Array.isArray(items)?items:[];
-    renderMatchingCandidateOptions("");
+    select.innerHTML='<option value="">求職者を選択</option>'+matchingCandidateItems.map((x,i)=>
+      `<option value="${i}">${esc(x.name||"")}｜${esc(x.prefecture||"")} ${esc(x.station||"")}｜${esc(x.experience||"")}</option>`).join("");
     matchingCandidatesLoaded=true;
     if(summary)summary.textContent=`求職者 ${matchingCandidateItems.length}名を読み込みました。`;
   }catch(err){
     select.innerHTML='<option value="">求職者を取得できませんでした</option>';
     if(summary)summary.textContent=err?.message||"求職者一覧を取得できませんでした。";
   }finally{select.disabled=false;}
-}
-
-function renderMatchingCandidateOptions(query){
-  const select=$("matchingCandidateSelect");if(!select)return;
-  const q=String(query||"").normalize("NFKC").toLowerCase().replace(/\s+/g,"").trim();
-  const current=select.value;
-  const filtered=matchingCandidateItems.map((x,i)=>({x,i})).filter(({x})=>{
-    if(!q)return true;
-    const text=[x.name,x.prefecture,x.station,x.experience,x.career,x.company].join(" ")
-      .normalize("NFKC").toLowerCase().replace(/\s+/g,"");
-    return text.includes(q);
-  }).slice(0,200);
-  select.innerHTML='<option value="">'+(q?`候補 ${filtered.length}名`:'求職者を選択')+'</option>'+filtered.map(({x,i})=>
-    `<option value="${i}">${esc(x.name||"")}｜${esc(x.prefecture||"")} ${esc(x.station||"")}｜${esc(x.experience||"")}</option>`).join("");
-  if(filtered.some(({i})=>String(i)===String(current)))select.value=current;
 }
 
 async function loadMatchingJobsOnce(){
