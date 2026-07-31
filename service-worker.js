@@ -1,11 +1,11 @@
-const CACHE="wondercraft-wc-7-33-15-candidate-autocomplete";
+const CACHE="wondercraft-wc-7-41-match-reasons";
 const FILES=[
   "./",
   "./index.html",
-  "./style.css?v=7.33.15-candidate-autocomplete",
-  "./config.js?v=7.33.15-candidate-autocomplete",
-  "./app.js?v=7.33.15-candidate-autocomplete",
-  "./stations-data.js?v=7.33.15-candidate-autocomplete",
+  "./style.css?v=7.41-match-reasons",
+  "./config.js?v=7.41-match-reasons",
+  "./app.js?v=7.41-match-reasons",
+  "./stations-data.js?v=7.41-match-reasons",
   "./manifest.json",
   "./offline.html",
   "./assets/icon-192.png","./assets/header-logo.png","./assets/wondercraft-company-logo.png",

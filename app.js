@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.33.11 - 案件マッチングタイムアウト対策 */
+/* WonderCraft PWA WC-7.41 - おすすめ理由・ランク表示版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -78,7 +78,7 @@ window.addEventListener("load",async()=>{
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.33.11";
+      $("appVersion").textContent=config.VERSION||"WC-7.41";
     }
 
     await initialize();
@@ -149,7 +149,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.33.15-candidate-autocomplete",
+      "./service-worker.js?v=7.41-match-reasons",
       { updateViaCache:"none" }
     );
 
@@ -2108,30 +2108,93 @@ async function runJobMatching(){
   await hideWcLoading_();
 }
 
+function getMatchRank_(x){
+  const percent=Number(x?.percent||0);
+  if(percent>=90)return {label:"Sランク",className:"rank-s"};
+  if(percent>=80)return {label:"Aランク",className:"rank-a"};
+  if(percent>=65)return {label:"Bランク",className:"rank-b"};
+  return {label:"Cランク",className:"rank-c"};
+}
+
+function normalizeCareerBadge_(value){
+  const text=String(value||"").normalize("NFKC").toLowerCase();
+  if(/softbank|ソフトバンク|sb/.test(text))return {label:"SoftBank",className:"career-sb"};
+  if(/docomo|ドコモ/.test(text))return {label:"docomo",className:"career-docomo"};
+  if(/au|エーユー|kddi/.test(text))return {label:"au",className:"career-au"};
+  if(/楽天|rakuten/.test(text))return {label:"楽天",className:"career-rakuten"};
+  return {label:String(value||"その他"),className:"career-other"};
+}
+
+function buildMatchReasonList_(x){
+  const reasons=(x.reasons||[])
+    .filter(Boolean)
+    .filter(v=>!String(v).includes("通勤条件補正"));
+
+  if(!reasons.length){
+    if(x.commuteMinutes!=null)reasons.push(`通勤 約${Number(x.commuteMinutes)}分`);
+    if(x.price)reasons.push(`単価 ${x.price}`);
+    const career=x.career||x.requiredCareer||x.inferredCareer;
+    if(career)reasons.push(`${career}案件`);
+  }
+
+  return reasons.slice(0,4);
+}
+
 function matchBadges(x){
-  return `<div class="match-meta"><span class="match-grade">${esc(x.grade||"")}</span>`+
-    (x.reasons||[]).filter(v=>!v.includes("通勤条件補正")).map(v=>`<span class="match-reason">${esc(v)}</span>`).join("")+
-    (x.cautions||[]).map(v=>`<span class="match-caution">${esc(v)}</span>`).join("")+`</div>`;
+  const rank=getMatchRank_(x);
+  return `<div class="match-meta">
+    <span class="match-rank ${rank.className}">${esc(rank.label)}</span>
+    ${(x.cautions||[]).map(v=>`<span class="match-caution">${esc(v)}</span>`).join("")}
+  </div>`;
+}
+
+function renderMatchReasons_(x){
+  const reasons=buildMatchReasonList_(x);
+  if(!reasons.length)return "";
+  return `<section class="match-recommendation">
+    <div class="match-recommendation-title">おすすめ理由</div>
+    <div class="match-recommendation-list">
+      ${reasons.map(v=>`<div><span aria-hidden="true">✓</span>${esc(v)}</div>`).join("")}
+    </div>
+  </section>`;
 }
 
 function renderJobMatchResults(items){
   const box=$("matchingResults");if(!box)return;
   if(!items.length){box.innerHTML='<div class="empty">マッチする案件がありません。</div>';return;}
-  box.innerHTML=items.map(x=>`<article class="card match-card">
-    <div class="match-score">${Number(x.percent||0)}%</div>
-    <h3>${esc(x.shopName||"案件名未設定")}</h3>${matchBadges(x)}
-    <div class="details">${rows([
-      ["案件元",x.sourceCompany],["エリア",x.area],["都道府県",x.prefecture],
-      ["通勤条件",x.commuteLimitExplicit
-        ? `本人上限${x.commuteLimitMinutes||"-"}分（+10分まで△表示）`
-        : "未記載：60分以内◎／61〜90分△"],
-      ["通勤判定",x.commuteLabel||x.commuteStatus||"要確認"],
-      ["通勤時間",x.commuteMinutes!=null?`約${x.commuteMinutes}分`:"要確認"],
-      ["通勤補正",Number(x.commutePenalty||0)>0?`-${Number(x.commutePenalty)}点`:"なし"],
-      ["単価",x.price],["未経験",x.beginnerAvailability],["稼働日数",x.workDays],
-      ["勤務時間",x.workTime],["休日",x.holiday]
-    ])}</div>${x.originalText?`<div class="remarks">${esc(x.originalText)}</div>`:""}
-  </article>`).join("");
+  box.innerHTML=items.map(x=>{
+    const career=normalizeCareerBadge_(x.career||x.requiredCareer||x.inferredCareer||inferCareer(x));
+    const displayName=getJobDisplayName_(x);
+    const storeName=x.officialStoreName||x.masterStoreName||x.storeName||"";
+    const brand=x.brand||x.storeBrand||"";
+    const agency=x.agency||x.agentCompany||x.operatorCompany||"";
+    const commuteStatus=String(x.commuteLabel||x.commuteStatus||"要確認");
+    const commuteClass=/◎|条件内|良好/.test(commuteStatus)?"commute-good":(/△|要確認/.test(commuteStatus)?"commute-warn":"commute-bad");
+
+    return `<article class="card match-card match-card-enhanced">
+      <div class="match-score">${Number(x.percent||0)}%</div>
+      <div class="match-card-heading">
+        <h3>${esc(displayName)}</h3>
+        <span class="career-badge ${career.className}">${esc(career.label)}</span>
+      </div>
+      ${matchBadges(x)}
+      ${renderMatchReasons_(x)}
+      <div class="details">${rows([
+        ["案件元",x.sourceCompany],["エリア",x.area],["都道府県",x.prefecture],
+        ["通勤判定",commuteStatus],
+        ["通勤時間",x.commuteMinutes!=null?`約${x.commuteMinutes}分`:"要確認"],
+        ["単価",x.price],["未経験",x.beginnerAvailability],["稼働日数",x.workDays],
+        ["勤務時間",x.workTime],["休日",x.holiday]
+      ])}</div>
+      ${(storeName||brand||agency)?`<section class="match-store-info">
+        <div class="match-store-title">店舗情報</div>
+        ${storeName?`<div><span>正式店舗名</span><strong>${esc(storeName)}</strong></div>`:""}
+        ${brand?`<div><span>ブランド</span><strong>${esc(brand)}</strong></div>`:""}
+        ${agency?`<div><span>代理店</span><strong>${esc(agency)}</strong></div>`:""}
+      </section>`:""}
+      ${x.originalText?`<details class="match-original"><summary>案件詳細を見る</summary><div class="remarks">${esc(x.originalText)}</div></details>`:""}
+    </article>`;
+  }).join("");
 }
 
 function renderCandidateMatchResults(items){

@@ -2534,3 +2534,23 @@ header.app-header{
 .matching-candidate-option small{grid-column:1/-1;color:#6a788c;font-size:11px;font-weight:700}
 .matching-candidate-empty{padding:16px 12px;color:#6a788c;font-size:13px;text-align:center}
 @media(max-width:700px){.matching-candidate-suggestions{max-height:300px}}
+
+/* WC-7.41 おすすめ理由・ランク・店舗情報 */
+.match-card-enhanced{overflow:hidden;border-top:4px solid #1769db}
+.match-card-heading{display:flex;align-items:flex-start;gap:10px;padding-right:72px}
+.match-card-heading h3{flex:1;padding-right:0!important;margin-bottom:8px}
+.match-meta{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0 12px}
+.match-rank,.career-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900;white-space:nowrap}
+.rank-s{background:#fff1c2;color:#855d00}.rank-a{background:#e8f8ef;color:#087443}.rank-b{background:#eaf3ff;color:#1559a7}.rank-c{background:#f0f2f5;color:#536174}
+.career-sb{background:#fff1f1;color:#c52e2e}.career-docomo{background:#fce9ef;color:#bd204b}.career-au{background:#fff1df;color:#a95600}.career-rakuten{background:#f7e9ff;color:#7e29a6}.career-other{background:#eef2f7;color:#4b5b70}
+.match-recommendation{margin:12px 0 14px;padding:13px 14px;border:1px solid #cdebdc;border-radius:13px;background:#f1fbf6}
+.match-recommendation-title{margin-bottom:7px;color:#087443;font-size:13px;font-weight:900}
+.match-recommendation-list{display:grid;gap:5px;color:#29463a;font-size:13px;font-weight:700}
+.match-recommendation-list div{display:flex;gap:7px;align-items:flex-start}
+.match-recommendation-list span{color:#0a8a51;font-weight:900}
+.match-store-info{display:grid;gap:7px;margin-top:14px;padding:13px 14px;border:1px solid #dce5f0;border-radius:13px;background:#f8fafc}
+.match-store-title{color:#173a67;font-size:13px;font-weight:900}
+.match-store-info>div:not(.match-store-title){display:grid;grid-template-columns:90px 1fr;gap:10px;font-size:12px}
+.match-store-info span{color:#6a788c;font-weight:700}.match-store-info strong{color:#1d2b42}
+.match-original{margin-top:12px}.match-original summary{cursor:pointer;color:#1769aa;font-size:13px;font-weight:800}
+@media(max-width:700px){.match-card-heading{display:grid;grid-template-columns:1fr;padding-right:68px}.career-badge{justify-self:start}.match-store-info>div:not(.match-store-title){grid-template-columns:78px 1fr}}
