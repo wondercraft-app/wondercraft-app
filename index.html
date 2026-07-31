@@ -239,7 +239,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.33.11-matching-timeout-fix">
+  <link rel="stylesheet" href="./style.css?v=7.33.14-candidate-search">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -253,7 +253,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.33.11</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.33.14</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -358,7 +358,10 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
           <p>求職者を選択し、条件に合う案件をおすすめ順に確認できます。</p>
         </section>
         <section class="matching-controls">
-          <label>求職者
+          <label>求職者を検索
+            <input id="matchingCandidateSearch" type="search" placeholder="名前・都道府県・駅・経験を入力" autocomplete="off">
+          </label>
+          <label>候補
             <select id="matchingCandidateSelect"><option value="">求職者を選択</option></select>
           </label>
           <button id="runMatchingBtn" class="primary" type="button">おすすめ案件を探す</button>
@@ -619,9 +622,9 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.33.11-matching-timeout-fix"></script>
-  <script src="./stations-data.js?v=7.33.11-matching-timeout-fix"></script>
-  <script src="./app.js?v=7.33.11-matching-timeout-fix"></script>
+  <script src="./config.js?v=7.33.14-candidate-search"></script>
+  <script src="./stations-data.js?v=7.33.14-candidate-search"></script>
+  <script src="./app.js?v=7.33.14-candidate-search"></script>
 
 </body>
 </html>

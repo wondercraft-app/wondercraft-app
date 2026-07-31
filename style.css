@@ -2510,3 +2510,5 @@ header.app-header{
 .station-candidate-empty{padding:16px 12px;color:#6a788c;font-size:13px;text-align:center}
 #jobOriginStationMessage.selected{color:#087563!important;font-weight:800!important}
 @media(max-width:700px){.station-candidates{max-height:280px}.station-candidate{min-height:60px!important}}
+
+.matching-controls input[type="search"]{background:#fff;}
