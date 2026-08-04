@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.41.4 - 求職者キャリア保存修正版 */
+/* WonderCraft PWA WC-7.41.5 - iPhone API URL生成修正版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -149,7 +149,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.41-match-reasons",
+      "./service-worker.js?v=7.41.5-api-url-fix",
       { updateViaCache:"none" }
     );
 
@@ -508,12 +508,65 @@ function normalizeUserFacingError(err){
 
 function showMaintenance(message){hideLogin();$("appPanel").hidden=true;$("systemPanel").hidden=false;$("systemTitle").textContent="メンテナンス中";$("systemMessage").textContent=message||"現在メンテナンス中です。";$("systemRetryBtn").hidden=true}
 
+function wcBuildApiGetUrl_(api,action,params={},token=""){
+  const base=String(api||"")
+    .trim()
+    .replace(/^["']|["']$/g,"")
+    .replace(/\s+/g,"")
+    .replace(/\/+$/,"");
+
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/i.test(base)){
+    const error=new Error(
+      "GAS API URLの形式が正しくありません。config.jsのGAS_API_URLを確認してください。"
+    );
+    error.code="INVALID_API_URL";
+    throw error;
+  }
+
+  const query=new URLSearchParams();
+  query.set("api","1");
+  query.set("action",String(action||""));
+  query.set("token",String(token||""));
+
+  Object.entries(params||{}).forEach(([key,value])=>{
+    if(
+      value!==undefined &&
+      value!==null &&
+      String(value)!==""
+    ){
+      query.set(String(key),String(value));
+    }
+  });
+
+  return base+"?"+query.toString();
+}
+
 async function apiGet(action,params={},api=getApi(),token=getToken()){
-  const url=new URL(api);url.searchParams.set("api","1");url.searchParams.set("action",action);url.searchParams.set("token",token);
-  Object.entries(params).forEach(([key,value])=>{if(value!==undefined&&value!==null&&String(value)!=="")url.searchParams.set(key,value)});
-  const response=await wcFetchWithTimeout_(url.toString(),{redirect:"follow",cache:"no-store"});
+  const requestUrl=wcBuildApiGetUrl_(
+    api,
+    action,
+    params,
+    token
+  );
+
+  const response=await wcFetchWithTimeout_(
+    requestUrl,
+    {
+      redirect:"follow",
+      cache:"no-store"
+    }
+  );
+
   const json=await response.json();
-  if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
+
+  if(!json.success){
+    const error=new Error(
+      json.error||"APIエラー"
+    );
+    error.code=json.code||"API_ERROR";
+    throw error;
+  }
+
   return json.data;
 }
 
@@ -713,16 +766,8 @@ function normalizeCareerSelections(value){
   return [...new Set(out)];
 }
 function selectedCareerValue(){
-  const labels={
-    docomo:"docomo",
-    sb:"SB/Y",
-    au:"au/UQ",
-    rakuten:"楽天"
-  };
-  return [...document.querySelectorAll('input[name="careerExperience"]:checked')]
-    .map(el=>labels[el.value])
-    .filter(Boolean)
-    .join(",");
+  const labels={docomo:"ドコモ",sb:"SB",au:"au",rakuten:"楽天"};
+  return [...document.querySelectorAll('input[name="careerExperience"]:checked')].map(el=>labels[el.value]).filter(Boolean).join(",");
 }
 
 function buildCandidateForm(x){
@@ -759,13 +804,7 @@ async function saveEdit(e){
   try{
     if(state.selected.type==="candidate"){
       const x=state.selected.item;
-      const saved=await apiPost("updateCandidate",{sheetName:x.sheetName,rowNumber:x.rowNumber,originalName:x.name,staff:v("fStaff"),name:v("fName"),prefecture:v("fPref"),station:v("fStation"),company:v("fCompany"),price:v("fPrice"),career:selectedCareerValue(),experience:v("fExp"),startDate:v("fStart"),progress:v("fProg"),moveType:v("fMove"),skillSheetUrl:v("fSkillSheetUrl"),remarks:v("fRemarks")});
-      if(
-        saved?.savedProgress!==undefined &&
-        String(saved.savedProgress)!==String(v("fProg"))
-      ){
-        throw new Error("進捗の保存確認に失敗しました。");
-      }
+      await apiPost("updateCandidate",{sheetName:x.sheetName,rowNumber:x.rowNumber,originalName:x.name,staff:v("fStaff"),name:v("fName"),prefecture:v("fPref"),station:v("fStation"),company:v("fCompany"),price:v("fPrice"),career:selectedCareerValue(),experience:v("fExp"),startDate:v("fStart"),progress:v("fProg"),moveType:v("fMove"),skillSheetUrl:v("fSkillSheetUrl"),remarks:v("fRemarks")});
     }else{
       const x=state.selected.item;
       await apiPost("updateProgress",{rowNumber:x.rowNumber,originalName:x.name,entryMonth:v("fEntry"),staff:v("fStaff"),company:v("fCompany"),name:v("fName"),projectStaff:v("fProjectStaff"),upperCompany:v("fUpper"),status:v("fStatus"),area:v("fArea"),remarks:v("fRemarks")});
