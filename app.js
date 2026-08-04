@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.41.1 - 求職者編集スクロール・保存ボタン固定版 */
+/* WonderCraft PWA WC-7.41.2 - 編集保存ボタン下部ナビ重なり修正版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -768,6 +768,7 @@ function isSafeSkillSheetUrl(value){try{const url=new URL(String(value||"").trim
 function openSkillSheet(){const url=v("fSkillSheetUrl");if(!isSafeSkillSheetUrl(url)){setMsg("modalMessage","Google DriveまたはGoogleドキュメントのURLを入力してください。","error");return}window.open(url,"_blank","noopener,noreferrer")}
 function v(id){return $(id)?.value||""}
 let wcModalBodyScrollY_=0;
+let wcModalBottomNavDisplay_="";
 
 function wcPrepareEditModalLayout_(){
   const modal=$("modal");
@@ -775,12 +776,19 @@ function wcPrepareEditModalLayout_(){
 
   if(!modal||!form)return;
 
+  /*
+   * 下部ナビより必ず前面に表示する。
+   */
+  modal.style.position="fixed";
+  modal.style.inset="0";
+  modal.style.zIndex="99999";
   modal.style.overflowY="auto";
   modal.style.overflowX="hidden";
   modal.style.overscrollBehavior="contain";
   modal.style.webkitOverflowScrolling="touch";
   modal.style.touchAction="pan-y";
-  modal.style.paddingBottom="env(safe-area-inset-bottom, 0px)";
+  modal.style.paddingBottom=
+    "calc(24px + env(safe-area-inset-bottom, 0px))";
 
   const modalContent=
     modal.querySelector(
@@ -790,13 +798,18 @@ function wcPrepareEditModalLayout_(){
 
   if(modalContent){
     modalContent.style.maxHeight="calc(100dvh - 16px)";
+    modalContent.style.height="calc(100dvh - 16px)";
     modalContent.style.overflowY="auto";
     modalContent.style.overflowX="hidden";
     modalContent.style.overscrollBehavior="contain";
     modalContent.style.webkitOverflowScrolling="touch";
     modalContent.style.scrollBehavior="auto";
+    modalContent.style.scrollPaddingBottom="180px";
     modalContent.style.marginTop="8px";
     modalContent.style.marginBottom="8px";
+    modalContent.style.paddingBottom=
+      "calc(150px + env(safe-area-inset-bottom, 0px))";
+    modalContent.style.boxSizing="border-box";
   }
 
   form.style.minHeight="0";
@@ -817,13 +830,16 @@ function wcPrepareEditModalLayout_(){
     if(actionArea){
       actionArea.style.position="sticky";
       actionArea.style.bottom="0";
-      actionArea.style.zIndex="50";
+      actionArea.style.left="0";
+      actionArea.style.right="0";
+      actionArea.style.zIndex="100";
       actionArea.style.background="var(--surface, #ffffff)";
       actionArea.style.paddingTop="12px";
       actionArea.style.paddingBottom=
-        "calc(12px + env(safe-area-inset-bottom, 0px))";
+        "calc(16px + env(safe-area-inset-bottom, 0px))";
       actionArea.style.borderTop="1px solid rgba(0,0,0,.12)";
       actionArea.style.boxShadow="0 -6px 16px rgba(0,0,0,.08)";
+      actionArea.style.boxSizing="border-box";
     }
 
     saveButton.style.position="relative";
@@ -853,6 +869,19 @@ function openModal(){
   document.body.style.right="0";
   document.body.style.width="100%";
   document.body.style.overflow="hidden";
+
+  /*
+   * 固定下部ナビが保存ボタンへ重ならないよう、
+   * 編集中だけ非表示にする。
+   */
+  const bottomNav=
+    document.querySelector(".bottom-nav");
+
+  if(bottomNav){
+    wcModalBottomNavDisplay_=
+      bottomNav.style.display || "";
+    bottomNav.style.display="none";
+  }
 
   modal.hidden=false;
   setMsg("modalMessage","");
@@ -884,6 +913,14 @@ function closeModal(){
   document.body.style.right="";
   document.body.style.width="";
   document.body.style.overflow="";
+
+  const bottomNav=
+    document.querySelector(".bottom-nav");
+
+  if(bottomNav){
+    bottomNav.style.display=
+      wcModalBottomNavDisplay_;
+  }
 
   window.scrollTo(0,wcModalBodyScrollY_);
 }
