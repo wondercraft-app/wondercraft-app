@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.41 - おすすめ理由・ランク表示版 */
+/* WonderCraft PWA WC-7.41.1 - 求職者編集スクロール・保存ボタン固定版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -767,8 +767,136 @@ function updateSkillSheetButton(){const btn=$("openSkillSheetBtn");if(!btn)retur
 function isSafeSkillSheetUrl(value){try{const url=new URL(String(value||"").trim());return url.protocol==="https:"&&(url.hostname==="drive.google.com"||url.hostname==="docs.google.com")}catch(_){return false}}
 function openSkillSheet(){const url=v("fSkillSheetUrl");if(!isSafeSkillSheetUrl(url)){setMsg("modalMessage","Google DriveまたはGoogleドキュメントのURLを入力してください。","error");return}window.open(url,"_blank","noopener,noreferrer")}
 function v(id){return $(id)?.value||""}
-function openModal(){$("modal").hidden=false;document.body.style.overflow="hidden";setMsg("modalMessage","")}
-function closeModal(){$("modal").hidden=true;document.body.style.overflow=""}
+let wcModalBodyScrollY_=0;
+
+function wcPrepareEditModalLayout_(){
+  const modal=$("modal");
+  const form=$("editForm");
+
+  if(!modal||!form)return;
+
+  modal.style.overflowY="auto";
+  modal.style.overflowX="hidden";
+  modal.style.overscrollBehavior="contain";
+  modal.style.webkitOverflowScrolling="touch";
+  modal.style.touchAction="pan-y";
+  modal.style.paddingBottom="env(safe-area-inset-bottom, 0px)";
+
+  const modalContent=
+    modal.querySelector(
+      ".modal-content, .modal-card, .dialog-content, [role='dialog']"
+    ) ||
+    form.parentElement;
+
+  if(modalContent){
+    modalContent.style.maxHeight="calc(100dvh - 16px)";
+    modalContent.style.overflowY="auto";
+    modalContent.style.overflowX="hidden";
+    modalContent.style.overscrollBehavior="contain";
+    modalContent.style.webkitOverflowScrolling="touch";
+    modalContent.style.scrollBehavior="auto";
+    modalContent.style.marginTop="8px";
+    modalContent.style.marginBottom="8px";
+  }
+
+  form.style.minHeight="0";
+  form.style.paddingBottom="0";
+
+  const saveButton=
+    form.querySelector(
+      'button[type="submit"], input[type="submit"]'
+    );
+
+  if(saveButton){
+    const actionArea=
+      saveButton.closest(
+        ".modal-actions, .form-actions, .actions, .button-row"
+      ) ||
+      saveButton.parentElement;
+
+    if(actionArea){
+      actionArea.style.position="sticky";
+      actionArea.style.bottom="0";
+      actionArea.style.zIndex="50";
+      actionArea.style.background="var(--surface, #ffffff)";
+      actionArea.style.paddingTop="12px";
+      actionArea.style.paddingBottom=
+        "calc(12px + env(safe-area-inset-bottom, 0px))";
+      actionArea.style.borderTop="1px solid rgba(0,0,0,.12)";
+      actionArea.style.boxShadow="0 -6px 16px rgba(0,0,0,.08)";
+    }
+
+    saveButton.style.position="relative";
+    saveButton.style.zIndex="51";
+  }
+
+  form.querySelectorAll(
+    "input, select, textarea"
+  ).forEach(function(control){
+    control.style.scrollMarginBottom="120px";
+  });
+}
+
+function openModal(){
+  const modal=$("modal");
+  if(!modal)return;
+
+  wcModalBodyScrollY_=
+    window.scrollY ||
+    document.documentElement.scrollTop ||
+    0;
+
+  document.body.style.position="fixed";
+  document.body.style.top=
+    "-"+wcModalBodyScrollY_+"px";
+  document.body.style.left="0";
+  document.body.style.right="0";
+  document.body.style.width="100%";
+  document.body.style.overflow="hidden";
+
+  modal.hidden=false;
+  setMsg("modalMessage","");
+
+  requestAnimationFrame(function(){
+    wcPrepareEditModalLayout_();
+
+    const modalContent=
+      modal.querySelector(
+        ".modal-content, .modal-card, .dialog-content, [role='dialog']"
+      ) ||
+      $("editForm")?.parentElement;
+
+    if(modalContent){
+      modalContent.scrollTop=0;
+    }else{
+      modal.scrollTop=0;
+    }
+  });
+}
+
+function closeModal(){
+  const modal=$("modal");
+  if(modal)modal.hidden=true;
+
+  document.body.style.position="";
+  document.body.style.top="";
+  document.body.style.left="";
+  document.body.style.right="";
+  document.body.style.width="";
+  document.body.style.overflow="";
+
+  window.scrollTo(0,wcModalBodyScrollY_);
+}
+
+window.visualViewport?.addEventListener(
+  "resize",
+  function(){
+    const modal=$("modal");
+    if(modal&&!modal.hidden){
+      wcPrepareEditModalLayout_();
+    }
+  }
+);
 function showLoading(){setStatus("");$("cards").innerHTML='<div class="loading">読み込み中です...</div>'}
 function showEmpty(t="該当するデータはありません。"){$("cards").innerHTML=`<div class="empty">${esc(t)}</div>`}
 function showError(e){$("cards").innerHTML=`<div class="error">${esc(e.message||String(e))}</div>`}
@@ -2209,15 +2337,3 @@ function renderCandidateMatchResults(items){
     ])}</div>${x.remarks?`<div class="remarks">${esc(x.remarks)}</div>`:""}
   </article>`).join("");
 }
-
-
-
-
-
-
-
-
-
-
-
-
