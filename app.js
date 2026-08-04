@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.41.3 - 編集フッター最下部固定版 */
+/* WonderCraft PWA WC-7.41.4 - 求職者キャリア保存修正版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -713,8 +713,16 @@ function normalizeCareerSelections(value){
   return [...new Set(out)];
 }
 function selectedCareerValue(){
-  const labels={docomo:"ドコモ",sb:"SB",au:"au",rakuten:"楽天"};
-  return [...document.querySelectorAll('input[name="careerExperience"]:checked')].map(el=>labels[el.value]).filter(Boolean).join(",");
+  const labels={
+    docomo:"docomo",
+    sb:"SB/Y",
+    au:"au/UQ",
+    rakuten:"楽天"
+  };
+  return [...document.querySelectorAll('input[name="careerExperience"]:checked')]
+    .map(el=>labels[el.value])
+    .filter(Boolean)
+    .join(",");
 }
 
 function buildCandidateForm(x){
@@ -751,7 +759,13 @@ async function saveEdit(e){
   try{
     if(state.selected.type==="candidate"){
       const x=state.selected.item;
-      await apiPost("updateCandidate",{sheetName:x.sheetName,rowNumber:x.rowNumber,originalName:x.name,staff:v("fStaff"),name:v("fName"),prefecture:v("fPref"),station:v("fStation"),company:v("fCompany"),price:v("fPrice"),career:selectedCareerValue(),experience:v("fExp"),startDate:v("fStart"),progress:v("fProg"),moveType:v("fMove"),skillSheetUrl:v("fSkillSheetUrl"),remarks:v("fRemarks")});
+      const saved=await apiPost("updateCandidate",{sheetName:x.sheetName,rowNumber:x.rowNumber,originalName:x.name,staff:v("fStaff"),name:v("fName"),prefecture:v("fPref"),station:v("fStation"),company:v("fCompany"),price:v("fPrice"),career:selectedCareerValue(),experience:v("fExp"),startDate:v("fStart"),progress:v("fProg"),moveType:v("fMove"),skillSheetUrl:v("fSkillSheetUrl"),remarks:v("fRemarks")});
+      if(
+        saved?.savedProgress!==undefined &&
+        String(saved.savedProgress)!==String(v("fProg"))
+      ){
+        throw new Error("進捗の保存確認に失敗しました。");
+      }
     }else{
       const x=state.selected.item;
       await apiPost("updateProgress",{rowNumber:x.rowNumber,originalName:x.name,entryMonth:v("fEntry"),staff:v("fStaff"),company:v("fCompany"),name:v("fName"),projectStaff:v("fProjectStaff"),upperCompany:v("fUpper"),status:v("fStatus"),area:v("fArea"),remarks:v("fRemarks")});
