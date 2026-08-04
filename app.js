@@ -1,4 +1,4 @@
-/* WonderCraft PWA WC-7.41.2 - 編集保存ボタン下部ナビ重なり修正版 */
+/* WonderCraft PWA WC-7.41.3 - 編集フッター最下部固定版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
@@ -776,9 +776,6 @@ function wcPrepareEditModalLayout_(){
 
   if(!modal||!form)return;
 
-  /*
-   * 下部ナビより必ず前面に表示する。
-   */
   modal.style.position="fixed";
   modal.style.inset="0";
   modal.style.zIndex="99999";
@@ -787,8 +784,7 @@ function wcPrepareEditModalLayout_(){
   modal.style.overscrollBehavior="contain";
   modal.style.webkitOverflowScrolling="touch";
   modal.style.touchAction="pan-y";
-  modal.style.paddingBottom=
-    "calc(24px + env(safe-area-inset-bottom, 0px))";
+  modal.style.paddingBottom="env(safe-area-inset-bottom, 0px)";
 
   const modalContent=
     modal.querySelector(
@@ -804,16 +800,16 @@ function wcPrepareEditModalLayout_(){
     modalContent.style.overscrollBehavior="contain";
     modalContent.style.webkitOverflowScrolling="touch";
     modalContent.style.scrollBehavior="auto";
-    modalContent.style.scrollPaddingBottom="180px";
     modalContent.style.marginTop="8px";
     modalContent.style.marginBottom="8px";
+    modalContent.style.scrollPaddingBottom="180px";
     modalContent.style.paddingBottom=
-      "calc(150px + env(safe-area-inset-bottom, 0px))";
+      "calc(190px + env(safe-area-inset-bottom, 0px))";
     modalContent.style.boxSizing="border-box";
   }
 
   form.style.minHeight="0";
-  form.style.paddingBottom="0";
+  form.style.paddingBottom="180px";
 
   const saveButton=
     form.querySelector(
@@ -828,17 +824,23 @@ function wcPrepareEditModalLayout_(){
       saveButton.parentElement;
 
     if(actionArea){
-      actionArea.style.position="sticky";
+      actionArea.style.position="fixed";
       actionArea.style.bottom="0";
       actionArea.style.left="0";
       actionArea.style.right="0";
-      actionArea.style.zIndex="100";
+      actionArea.style.width="100%";
+      actionArea.style.maxWidth="840px";
+      actionArea.style.marginLeft="auto";
+      actionArea.style.marginRight="auto";
+      actionArea.style.zIndex="100000";
       actionArea.style.background="var(--surface, #ffffff)";
       actionArea.style.paddingTop="12px";
+      actionArea.style.paddingLeft="16px";
+      actionArea.style.paddingRight="16px";
       actionArea.style.paddingBottom=
         "calc(16px + env(safe-area-inset-bottom, 0px))";
       actionArea.style.borderTop="1px solid rgba(0,0,0,.12)";
-      actionArea.style.boxShadow="0 -6px 16px rgba(0,0,0,.08)";
+      actionArea.style.boxShadow="0 -8px 20px rgba(0,0,0,.10)";
       actionArea.style.boxSizing="border-box";
     }
 
@@ -870,10 +872,6 @@ function openModal(){
   document.body.style.width="100%";
   document.body.style.overflow="hidden";
 
-  /*
-   * 固定下部ナビが保存ボタンへ重ならないよう、
-   * 編集中だけ非表示にする。
-   */
   const bottomNav=
     document.querySelector(".bottom-nav");
 
