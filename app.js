@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.0 - 進捗同期・検索マッチング高速化版 */
+/* WonderCraft PWA WC-7.42.1 - 本日の面談カードiPhoneレイアウト修正版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.0";
+const WC_PWA_BUILD="WC-7.42.1";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -31,9 +31,123 @@ function wcInjectRuntimeFixStyles_(){
   const style=document.createElement("style");
   style.id="wc742RuntimeStyles";
   style.textContent=`
-    .interview-time{min-width:148px!important;width:148px!important;flex:0 0 148px!important;}
-    .interview-time strong{display:block!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important;font-variant-numeric:tabular-nums!important;line-height:1.05!important;}
-    .home-today-row time{white-space:nowrap!important;word-break:keep-all!important;font-variant-numeric:tabular-nums!important;}
+    /* WC-7.42.1 本日の面談カード */
+    .interview-card{
+      display:grid!important;
+      grid-template-columns:128px minmax(0,1fr)!important;
+      align-items:stretch!important;
+      overflow:hidden!important;
+    }
+
+    .interview-time{
+      min-width:0!important;
+      width:auto!important;
+      max-width:none!important;
+      flex:none!important;
+      box-sizing:border-box!important;
+      display:flex!important;
+      flex-direction:column!important;
+      align-items:center!important;
+      justify-content:center!important;
+      text-align:center!important;
+      overflow:hidden!important;
+    }
+
+    .interview-time strong{
+      display:block!important;
+      width:100%!important;
+      white-space:nowrap!important;
+      word-break:keep-all!important;
+      overflow-wrap:normal!important;
+      font-variant-numeric:tabular-nums!important;
+      line-height:1.05!important;
+      text-align:center!important;
+    }
+
+    .interview-time span{
+      white-space:nowrap!important;
+      word-break:keep-all!important;
+    }
+
+    .interview-body{
+      min-width:0!important;
+      width:auto!important;
+      max-width:100%!important;
+      box-sizing:border-box!important;
+      overflow:hidden!important;
+      position:relative!important;
+      z-index:1!important;
+    }
+
+    .interview-body h3{
+      max-width:100%!important;
+      overflow-wrap:anywhere!important;
+    }
+
+    .interview-body .badge{
+      display:inline-block!important;
+      max-width:100%!important;
+      white-space:normal!important;
+      overflow-wrap:anywhere!important;
+      box-sizing:border-box!important;
+    }
+
+    .interview-details{
+      min-width:0!important;
+      width:100%!important;
+      max-width:100%!important;
+      box-sizing:border-box!important;
+      overflow:hidden!important;
+    }
+
+    .interview-details > *{
+      min-width:0!important;
+    }
+
+    .home-today-row time{
+      white-space:nowrap!important;
+      word-break:keep-all!important;
+      font-variant-numeric:tabular-nums!important;
+    }
+
+    @media (max-width:600px){
+      .interview-card{
+        grid-template-columns:112px minmax(0,1fr)!important;
+      }
+
+      .interview-time{
+        padding-left:8px!important;
+        padding-right:8px!important;
+      }
+
+      .interview-time strong{
+        font-size:clamp(1.55rem,7vw,2rem)!important;
+      }
+
+      .interview-body{
+        padding-left:16px!important;
+        padding-right:14px!important;
+      }
+
+      .interview-body h3{
+        margin-top:0!important;
+      }
+
+      .interview-details{
+        font-size:.95rem!important;
+      }
+    }
+
+    @media (max-width:390px){
+      .interview-card{
+        grid-template-columns:104px minmax(0,1fr)!important;
+      }
+
+      .interview-body{
+        padding-left:14px!important;
+        padding-right:10px!important;
+      }
+    }
   `;
   document.head.appendChild(style);
 }
