@@ -1,9 +1,42 @@
-/* WonderCraft PWA WC-7.41.5 - iPhone API URL生成修正版 */
+/* WonderCraft PWA WC-7.42.0 - 進捗同期・検索マッチング高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
+const WC_PWA_BUILD="WC-7.42.0";
 let debounceTimer;
 let loadRequestId=0;
+
+// WC-7.42.0: 案件検索とマッチングで同じ案件一覧を共用する。
+let wcSharedMatchingJobs_=null;
+let wcSharedMatchingJobsPromise_=null;
+let wcSharedMatchingJobsLoadedAt_=0;
+const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
+
+async function wcLoadSharedMatchingJobs_(force=false){
+  const now=Date.now();
+  if(!force&&Array.isArray(wcSharedMatchingJobs_)&&now-wcSharedMatchingJobsLoadedAt_<WC_SHARED_JOBS_TTL_MS_){
+    return wcSharedMatchingJobs_;
+  }
+  if(!force&&wcSharedMatchingJobsPromise_)return wcSharedMatchingJobsPromise_;
+  wcSharedMatchingJobsPromise_=apiGet("matchingJobs").then(items=>{
+    wcSharedMatchingJobs_=Array.isArray(items)?items:[];
+    wcSharedMatchingJobsLoadedAt_=Date.now();
+    return wcSharedMatchingJobs_;
+  }).finally(()=>{wcSharedMatchingJobsPromise_=null;});
+  return wcSharedMatchingJobsPromise_;
+}
+
+function wcInjectRuntimeFixStyles_(){
+  if(document.getElementById("wc742RuntimeStyles"))return;
+  const style=document.createElement("style");
+  style.id="wc742RuntimeStyles";
+  style.textContent=`
+    .interview-time{min-width:148px!important;width:148px!important;flex:0 0 148px!important;}
+    .interview-time strong{display:block!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important;font-variant-numeric:tabular-nums!important;line-height:1.05!important;}
+    .home-today-row time{white-space:nowrap!important;word-break:keep-all!important;font-variant-numeric:tabular-nums!important;}
+  `;
+  document.head.appendChild(style);
+}
 
 const WC_API_TIMEOUT_MS = 45000;
 const WC_STARTUP_VISIBLE_TIMEOUT_MS = 9000;
@@ -75,10 +108,11 @@ window.addEventListener("load",async()=>{
 
   try{
     registerWonderCraftServiceWorker_();
+    wcInjectRuntimeFixStyles_();
     bindEvents();
 
     if($("appVersion")){
-      $("appVersion").textContent=config.VERSION||"WC-7.41";
+      $("appVersion").textContent=WC_PWA_BUILD;
     }
 
     await initialize();
@@ -149,7 +183,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.41.5-api-url-fix",
+      "./service-worker.js?v=7.42.0-progress-search-speed",
       { updateViaCache:"none" }
     );
 
@@ -785,7 +819,23 @@ function buildCandidateForm(x){
 }
 
 function progressStatusOptions(current){
-  const values=["","案件待ち","案件提案中","面談待ち","合否待ち","完了","取り下げ","他社面談予定"];
+  const fallback=[
+    "エントリー中(面談日調整中)",
+    "エントリー中(面談日確定)",
+    "1次面談実施(結果待ち)",
+    "1次面談実施(2次面談調整中)",
+    "1次面談実施(エンド面談調整中)",
+    "2次面談実施(結果待ち)",
+    "2次面談実施(エンド面談調整中)",
+    "2次面談日程確定",
+    "合否待ち",
+    "合格",
+    "不合格",
+    "辞退",
+    "案件消滅"
+  ];
+  const fromSheet=Array.isArray(state.progressStatuses)?state.progressStatuses.filter(Boolean):[];
+  const values=["",...(fromSheet.length?fromSheet:fallback)];
   if(current&&!values.includes(current))values.push(current);
   return [...new Set(values)];
 }
@@ -807,7 +857,10 @@ async function saveEdit(e){
       await apiPost("updateCandidate",{sheetName:x.sheetName,rowNumber:x.rowNumber,originalName:x.name,staff:v("fStaff"),name:v("fName"),prefecture:v("fPref"),station:v("fStation"),company:v("fCompany"),price:v("fPrice"),career:selectedCareerValue(),experience:v("fExp"),startDate:v("fStart"),progress:v("fProg"),moveType:v("fMove"),skillSheetUrl:v("fSkillSheetUrl"),remarks:v("fRemarks")});
     }else{
       const x=state.selected.item;
-      await apiPost("updateProgress",{rowNumber:x.rowNumber,originalName:x.name,entryMonth:v("fEntry"),staff:v("fStaff"),company:v("fCompany"),name:v("fName"),projectStaff:v("fProjectStaff"),upperCompany:v("fUpper"),status:v("fStatus"),area:v("fArea"),remarks:v("fRemarks")});
+      const savedProgress=await apiPost("updateProgress",{rowNumber:x.rowNumber,originalName:x.name,entryMonth:v("fEntry"),staff:v("fStaff"),company:v("fCompany"),name:v("fName"),projectStaff:v("fProjectStaff"),upperCompany:v("fUpper"),status:v("fStatus"),area:v("fArea"),remarks:v("fRemarks")});
+      if(savedProgress?.item){Object.assign(x,savedProgress.item);}
+      // 保存直後の一覧キャッシュを必ず捨て、スプレッドシートから再読込する。
+      wcViewCacheClear_();
     }
     // 保存成功後は編集画面に留まらず、すぐ元の一覧へ戻して最新データを再読込する。
     closeModal();
@@ -1309,7 +1362,20 @@ function setJobPayUnit_(unit){
   renderJobSearchResults();
 }
 function inferCareer(x){const t=normalizeJobText([x.shopName,x.originalText,x.sourceCompany].join(" "));if(/docomo|ドコモ/.test(t))return "docomo";if(/softbank|ソフトバンク|\bsb\b/.test(t))return "SB";if(/\bau\b|エーユー/.test(t))return "au";if(/楽天|rakuten/.test(t))return "楽天";return "その他";}
-async function loadJobSearchOnce(){if(jobSearchLoaded){renderJobSearchResults();return;}showWcLoading_("案件を読み込み中…");try{jobSearchItems=await apiGet("matchingJobs")||[];jobSearchLoaded=true;fillJobSearchFilters();updateJobRangeLabels();renderJobSearchResults();}catch(e){$("jobSearchResults").innerHTML=`<div class="error">${esc(e.message||"案件を取得できませんでした。")}</div>`;}finally{await hideWcLoading_();}}
+async function loadJobSearchOnce(){
+  if(jobSearchLoaded){renderJobSearchResults();return;}
+  showWcLoading_("案件を読み込み中…");
+  try{
+    const items=await wcLoadSharedMatchingJobs_();
+    jobSearchItems=(items||[]).map(wcPrepareJobSearchItem_);
+    jobSearchLoaded=true;
+    // マッチング側にも同じ配列を流用できるようにする。
+    matchingJobItems=items||[];
+    matchingJobsLoaded=Array.isArray(items);
+    fillJobSearchFilters();updateJobRangeLabels();renderJobSearchResults();
+  }catch(e){$("jobSearchResults").innerHTML=`<div class="error">${esc(e.message||"案件を取得できませんでした。")}</div>`;}
+  finally{await hideWcLoading_();}
+}
 const WC_JOB_REGION_MAP={"北海道": ["北海道"], "東北": ["青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"], "関東": ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県"], "甲信越": ["新潟県", "山梨県", "長野県"], "北陸": ["富山県", "石川県", "福井県"], "東海": ["岐阜県", "静岡県", "愛知県", "三重県"], "関西": ["滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"], "中国": ["鳥取県", "島根県", "岡山県", "広島県", "山口県"], "四国": ["徳島県", "香川県", "愛媛県", "高知県"], "九州": ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県"], "沖縄": ["沖縄県"]};
 
 function updateJobPrefectureOptions(){
@@ -1452,6 +1518,58 @@ function resolveOriginStationSelection_(){
   return null;
 }
 
+function wcPrepareJobSearchItem_(x){
+  if(!x||x.__wcPrepared)return x;
+  const locationText=normalizeJobText([x.shopName,x.prefecture,x.area].join(" "));
+  const companyText=normalizeJobText(x.sourceCompany||"");
+  const detailText=normalizeJobText([x.price,x.originalText,x.beginnerAvailability,x.remarks].join(" "));
+  x.__wcSearchText=[locationText,companyText,detailText].join(" ");
+  x.__wcLocationText=locationText;
+  x.__wcCompanyText=companyText;
+  x.__wcCareer=inferCareer(x);
+  x.__wcRegion=getJobRegion_(x);
+  x.__wcPay=extractJobPay(x.price);
+  x.__wcSpot=isSpotJob_(x);
+  x.__wcRemote=isRemoteJob_(x);
+  x.__wcTravel=isTravelJob_(x);
+  x.__wcJobDate=getJobDate_(x);
+  x.__wcPrepared=true;
+  return x;
+}
+
+function wcNormalizeSearchQuery_(value){
+  return normalizeJobText(value||"")
+    .replace(/ドコモ/g,"docomo")
+    .replace(/ソフトバンク/g,"softbank")
+    .replace(/ワイモバイル|ワイモバ/g,"ymobile")
+    .replace(/楽天モバイル/g,"楽天");
+}
+
+function wcKeywordTokens_(value){
+  return wcNormalizeSearchQuery_(value).split(/[\s　,，、/／]+/).map(v=>v.trim()).filter(Boolean);
+}
+
+function wcBeginnerMatches_(availability,filter){
+  if(!filter)return true;
+  const t=normalizeJobText(availability||"");
+  const f=normalizeJobText(filter||"");
+  if(/不可|ng|経験者のみ|経験必須/.test(f))return /不可|ng|経験者のみ|経験必須/.test(t);
+  if(/可|ok|未経験/.test(f))return !/不可|ng|経験者のみ|経験必須/.test(t)&&/可|ok|未経験|経験不問|歓迎/.test(t);
+  return t.includes(f);
+}
+
+function wcJobKeywordScore_(x,tokens){
+  if(!tokens.length)return 0;
+  const prepared=wcPrepareJobSearchItem_(x);
+  let score=0;
+  for(const token of tokens){
+    if(prepared.__wcLocationText.includes(token))score+=8;
+    else if(prepared.__wcCompanyText.includes(token))score+=4;
+    else if(prepared.__wcSearchText.includes(token))score+=1;
+  }
+  return score;
+}
+
 function fillJobSearchFilters(){
   const companies=[...new Set(jobSearchItems.map(x=>String(x.sourceCompany||"").trim()).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,"ja"));
@@ -1520,119 +1638,67 @@ async function runStationAwareJobSearch_(){
   const origin=String($("jobOriginStation")?.value||"").trim();
   if(origin&&!resolveOriginStationSelection_())return;
   const selectedOrigin=jobOriginStationSelection;
-  const originDisplay=selectedOrigin
-    ? `${selectedOrigin.name}駅（${selectedOrigin.prefecture}）`
-    : origin;
-  jobStationSearchApplied=false;
-  jobStationCommuteMap={};
-  jobStationSearchOrigin=originDisplay;
-  jobStationApiUnavailable=false;
-
+  const originDisplay=selectedOrigin?`${selectedOrigin.name}駅（${selectedOrigin.prefecture}）`:origin;
+  jobStationSearchApplied=false;jobStationCommuteMap={};jobStationSearchOrigin=originDisplay;jobStationApiUnavailable=false;
   renderJobSearchResults();
+  if(!origin){updateJobRangeLabels();return;}
 
-  if(!origin){
-    updateJobRangeLabels();
-    return;
-  }
-
-  const candidates=(jobSearchCurrentItems||[])
-    .filter(job=>Number(job.rowNumber)>0)
-    .slice(0,24);
-
+  const candidates=(jobSearchCurrentItems||[]).filter(job=>Number(job.rowNumber)>0).slice(0,24);
   if(!candidates.length)return;
+  const batchSize=4,batches=[];
+  for(let i=0;i<candidates.length;i+=batchSize)batches.push(candidates.slice(i,i+batchSize));
 
-  const batchSize=4;
-  const batches=[];
-  for(let i=0;i<candidates.length;i+=batchSize){
-    batches.push(candidates.slice(i,i+batchSize));
-  }
-
-  let successCount=0;
-  let failedBatchCount=0;
+  let successCount=0,failedBatchCount=0,completed=0;
+  const concurrency=Math.min(2,batches.length);
+  let nextIndex=0;
   jobStationCommuteMap={};
-
   showWcLoading_(`${originDisplay}からの通勤時間を確認中…`);
 
-  try{
-    for(let index=0;index<batches.length;index++){
+  async function worker(){
+    while(true){
+      const index=nextIndex++;
+      if(index>=batches.length)return;
       const batch=batches[index];
-
-      updateWcLoadingText_?.(
-        `${originDisplay}からの通勤時間を確認中… ${index+1}/${batches.length}`
-      );
-
       try{
         const result=await apiPost("stationJobCommutes",{
-          station:originDisplay,
-          stationData:selectedOrigin,
-          rowNumbers:batch.map(job=>Number(job.rowNumber))
+          station:originDisplay,stationData:selectedOrigin,
+          rowNumbers:batch.map(job=>Number(job.rowNumber)),
+          // WC-7.42.0: GASが案件管理シートをバッチごとに再読込しないためのスナップショット
+          jobs:batch.map(job=>({
+            rowNumber:Number(job.rowNumber),shopName:job.shopName||"",prefecture:job.prefecture||"",area:job.area||"",
+            sourceCompany:job.sourceCompany||"",price:job.price||"",originalText:job.originalText||"",
+            storeAddress:job.storeAddress||"",storeLat:job.storeLat||"",storeLng:job.storeLng||""
+          }))
         });
-
         const rows=Array.isArray(result?.results)?result.results:[];
-        rows.forEach(row=>{
-          jobStationCommuteMap[String(row.rowNumber)]=row;
-          if(row?.ok&&Number.isFinite(Number(row.minutes)))successCount++;
-        });
-
-        // 取得できた分から画面へ反映
-        jobStationSearchApplied=true;
-        renderJobSearchResults();
+        rows.forEach(row=>{jobStationCommuteMap[String(row.rowNumber)]=row;if(row?.ok&&Number.isFinite(Number(row.minutes)))successCount++;});
       }catch(batchError){
         failedBatchCount++;
         const message=String(batchError?.message||"");
-        if(/未対応のAPI action|stationJobCommutes/i.test(message)){
-          jobStationApiUnavailable=true;
-          throw batchError;
-        }
-        // タイムアウトしたバッチだけ飛ばして次を続行
-        batch.forEach(job=>{
-          jobStationCommuteMap[String(job.rowNumber)]={
-            rowNumber:Number(job.rowNumber),
-            ok:false,
-            minutes:null,
-            reason:"BATCH_TIMEOUT"
-          };
-        });
+        if(/未対応のAPI action|stationJobCommutes/i.test(message)){jobStationApiUnavailable=true;throw batchError;}
+        batch.forEach(job=>{jobStationCommuteMap[String(job.rowNumber)]={rowNumber:Number(job.rowNumber),ok:false,minutes:null,reason:"BATCH_TIMEOUT"};});
+      }finally{
+        completed++;
+        updateWcLoadingText_?.(`${originDisplay}からの通勤時間を確認中… ${completed}/${batches.length}`);
+        // 全件再描画を毎バッチ行わず、2バッチ単位で反映
+        if(completed%2===0||completed===batches.length){jobStationSearchApplied=true;renderJobSearchResults();}
       }
     }
+  }
 
-    jobStationSearchApplied=true;
-    renderJobSearchResults();
-
-    if(failedBatchCount>0){
-      const box=$("jobSearchResults");
-      box?.insertAdjacentHTML(
-        "afterbegin",
-        `<div class="job-search-notice compact">通勤時間内の案件と、起点駅と同一都道府県の「最寄り駅から選定」案件を表示しています。</div>`
-      );
-    }else if(successCount===0){
-      const box=$("jobSearchResults");
-      box?.insertAdjacentHTML(
-        "afterbegin",
-        `<div class="job-search-notice compact">通勤時間を取得できませんでした。起点駅と同一都道府県の「最寄り駅から選定」案件のみ表示しています。</div>`
-      );
-    }
+  try{
+    await Promise.all(Array.from({length:concurrency},()=>worker()));
+    jobStationSearchApplied=true;renderJobSearchResults();
+    const box=$("jobSearchResults");
+    if(failedBatchCount>0)box?.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">通勤時間内の案件と、起点駅と同一都道府県の「最寄り駅から選定」案件を表示しています。</div>`);
+    else if(successCount===0)box?.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">通勤時間を取得できませんでした。起点駅と同一都道府県の「最寄り駅から選定」案件のみ表示しています。</div>`);
   }catch(error){
     jobStationSearchApplied=false;
-    const message=String(error?.message||"");
-    jobStationApiUnavailable=/未対応のAPI action|stationJobCommutes/i.test(message);
-
+    const message=String(error?.message||"");jobStationApiUnavailable=/未対応のAPI action|stationJobCommutes/i.test(message);
     renderJobSearchResults();
-
     const box=$("jobSearchResults");
-    if(box){
-      const notice=jobStationApiUnavailable
-        ? "通勤時間検索を利用するには、最新GASの再デプロイが必要です。"
-        : "通勤時間だけ取得できませんでした。その他の条件で検索結果を表示しています。";
-
-      box.insertAdjacentHTML(
-        "afterbegin",
-        `<div class="job-search-notice compact">${notice}</div>`
-      );
-    }
-  }finally{
-    await hideWcLoading_(true);
-  }
+    if(box){const notice=jobStationApiUnavailable?"通勤時間検索を利用するには、最新GASの再デプロイが必要です。":"通勤時間だけ取得できませんでした。その他の条件で検索結果を表示しています。";box.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">${notice}</div>`);}
+  }finally{await hideWcLoading_(true);}
 }
 
 function getJobCommuteMinutes_(x){
@@ -1868,7 +1934,7 @@ function renderJobSearchResults(){
   const company=$("jobCompanyFilter")?.value||"";
   const career=$("jobCareerFilter")?.value||"";
   const beginner=$("jobBeginnerFilter")?.value||"";
-  const q=normalizeJobText($("jobKeywordFilter")?.value||"");
+  const qTokens=wcKeywordTokens_($("jobKeywordFilter")?.value||"");
   const min=Number($("jobPayMin")?.value||(jobPayUnit==="hourly"?1000:10000));
   const max=Number($("jobPayMax")?.value||(jobPayUnit==="hourly"?5000:50000));
   const maxMinutes=Number($("jobDistanceRange")?.value||60);
@@ -1881,17 +1947,18 @@ function renderJobSearchResults(){
   const dateTo=$("jobSpotDateTo")?.value||"";
 
   let items=jobSearchItems.filter(x=>{
-    const text=normalizeJobText([x.shopName,x.prefecture,x.area,x.sourceCompany,x.price,x.originalText,x.beginnerAvailability,x.remarks].join(" "));
-    const pay=extractJobPay(x.price);
+    x=wcPrepareJobSearchItem_(x);
+    const text=x.__wcSearchText;
+    const pay=x.__wcPay;
     const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
-    const jobRegion=getJobRegion_(x);
-    const travel=isTravelJob_(x);
-    const spot=isSpotJob_(x);
-    const remote=isRemoteJob_(x);
-    const jobDate=getJobDate_(x);
+    const jobRegion=x.__wcRegion;
+    const travel=x.__wcTravel;
+    const spot=x.__wcSpot;
+    const remote=x.__wcRemote;
+    const jobDate=x.__wcJobDate;
 
     const modeOk=jobSearchMode==="spot"?spot:!spot;
     const remoteOk=remoteMode==="include"||(remoteMode==="only"?remote:!remote);
@@ -1944,15 +2011,17 @@ function renderJobSearchResults(){
 
     return modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&commuteOk&&payOk&&
       (!company||x.sourceCompany===company)&&
-      (!career||inferCareer(x)===career)&&
-      (!beginner||normalizeJobText(x.beginnerAvailability).includes(normalizeJobText(beginner)))&&
-      (!q||text.includes(q));
+      (!career||x.__wcCareer===career)&&
+      wcBeginnerMatches_(x.beginnerAvailability,beginner)&&
+      (!qTokens.length||qTokens.every(token=>text.includes(token)));
   });
 
   jobSearchCurrentItems=items.slice();
 
   const sort=$("jobSort")?.value||"new";
-  if(sort==="payHigh")items.sort((a,b)=>extractJobPay(b.price)-extractJobPay(a.price));
+  if(qTokens.length){
+    items.sort((a,b)=>wcJobKeywordScore_(b,qTokens)-wcJobKeywordScore_(a,qTokens)||Number(b.rowNumber||0)-Number(a.rowNumber||0));
+  }else if(sort==="payHigh")items.sort((a,b)=>wcPrepareJobSearchItem_(b).__wcPay-wcPrepareJobSearchItem_(a).__wcPay);
   else if(sort==="name")items.sort((a,b)=>String(a.shopName||"").localeCompare(String(b.shopName||""),"ja"));
 
   $("jobResultCount").textContent=`${items.length}件`;
@@ -2249,14 +2318,16 @@ function handleMatchingCandidateKeydown_(event){
 }
 
 async function loadMatchingJobsOnce(){
-  if(matchingJobsLoaded)return;
+  if(matchingJobsLoaded&&matchingJobItems.length){renderMatchingJobOptions("");return;}
   const select=$("matchingJobSelect"),summary=$("matchingSummary");
   if(!select)return;
   select.disabled=true; select.innerHTML='<option value="">案件を読み込み中...</option>';
   try{
-    const items=await apiGet("matchingJobs");
+    const items=await wcLoadSharedMatchingJobs_();
     matchingJobItems=Array.isArray(items)?items:[];
-    matchingJobsLoaded=true; renderMatchingJobOptions("");
+    matchingJobsLoaded=true;
+    if(!jobSearchLoaded){jobSearchItems=matchingJobItems.map(wcPrepareJobSearchItem_);}
+    renderMatchingJobOptions("");
     if(summary)summary.textContent=`案件 ${matchingJobItems.length}件を読み込みました。`;
   }catch(err){
     select.innerHTML='<option value="">案件を取得できませんでした</option>';
@@ -2295,7 +2366,7 @@ async function runCandidateMatching(){
   const results=$("matchingResults"),summary=$("matchingSummary");
   results.innerHTML='<div class="loading">案件を比較中...</div>'; summary.textContent="";
   try{
-    const data=await apiPost("candidateJobMatches",{sheetName:c.sheetName,rowNumber:c.rowNumber,commuteCheckLimit:4});
+    const data=await apiPost("candidateJobMatches",{sheetName:c.sheetName,rowNumber:c.rowNumber,commuteCheckLimit:4,resultLimit:32});
     summary.textContent=`${data.candidate.name}さん｜全${data.totalJobs}件 → 条件絞込${data.filteredJobs ?? data.totalJobs}件 → 重複整理${data.dedupedJobs ?? data.filteredJobs ?? data.totalJobs}件｜おすすめ上位${(data.results||[]).length}件`;
     renderJobMatchResults(data.results||[]);
   }catch(err){
