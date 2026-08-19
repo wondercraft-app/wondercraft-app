@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.7 - 経験条件検索判定修正版 */
+/* WonderCraft PWA WC-7.42.8 - 案件検索タイムアウト耐性版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.7";
+const WC_PWA_BUILD="WC-7.42.8";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -12,18 +12,120 @@ let wcSharedMatchingJobsPromise_=null;
 let wcSharedMatchingJobsLoadedAt_=0;
 const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
 
-async function wcLoadSharedMatchingJobs_(force=false){
-  const now=Date.now();
-  if(!force&&Array.isArray(wcSharedMatchingJobs_)&&now-wcSharedMatchingJobsLoadedAt_<WC_SHARED_JOBS_TTL_MS_){
-    return wcSharedMatchingJobs_;
+async const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7428";
+const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7428";
+const WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_=6*60*60*1000;
+
+function wcReadPersistentMatchingJobsV7428_(){
+  try{
+    const raw=localStorage.getItem(WC_MATCHING_JOBS_STORAGE_KEY_);
+    const at=Number(localStorage.getItem(WC_MATCHING_JOBS_STORAGE_AT_KEY_)||0);
+    if(!raw||!at)return null;
+    if(Date.now()-at>WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_)return null;
+
+    const items=JSON.parse(raw);
+    if(!Array.isArray(items)||!items.length)return null;
+
+    return {
+      items,
+      at
+    };
+  }catch(e){
+    return null;
   }
-  if(!force&&wcSharedMatchingJobsPromise_)return wcSharedMatchingJobsPromise_;
-  wcSharedMatchingJobsPromise_=apiGet("matchingJobs").then(items=>{
-    wcSharedMatchingJobs_=Array.isArray(items)?items:[];
-    wcSharedMatchingJobsLoadedAt_=Date.now();
-    return wcSharedMatchingJobs_;
-  }).finally(()=>{wcSharedMatchingJobsPromise_=null;});
+}
+
+function wcWritePersistentMatchingJobsV7428_(items){
+  if(!Array.isArray(items)||!items.length)return false;
+
+  try{
+    localStorage.setItem(
+      WC_MATCHING_JOBS_STORAGE_KEY_,
+      JSON.stringify(items)
+    );
+    localStorage.setItem(
+      WC_MATCHING_JOBS_STORAGE_AT_KEY_,
+      String(Date.now())
+    );
+    return true;
+  }catch(e){
+    // 容量制限等でも検索自体は止めない。
+    return false;
+  }
+}
+
+function wcLoadSharedMatchingJobs_(force=false){
+  const now=Date.now();
+
+  if(
+    !force &&
+    Array.isArray(wcSharedMatchingJobs_) &&
+    now-wcSharedMatchingJobsLoadedAt_<WC_SHARED_JOBS_TTL_MS_
+  ){
+    return Promise.resolve(wcSharedMatchingJobs_);
+  }
+
+  if(!force&&wcSharedMatchingJobsPromise_){
+    return wcSharedMatchingJobsPromise_;
+  }
+
+  wcSharedMatchingJobsPromise_=
+    apiGet("matchingJobs")
+      .then(items=>{
+        wcSharedMatchingJobs_=
+          Array.isArray(items)
+            ? items
+            : [];
+
+        wcSharedMatchingJobsLoadedAt_=
+          Date.now();
+
+        wcWritePersistentMatchingJobsV7428_(
+          wcSharedMatchingJobs_
+        );
+
+        return wcSharedMatchingJobs_;
+      })
+      .finally(()=>{
+        wcSharedMatchingJobsPromise_=null;
+      });
+
   return wcSharedMatchingJobsPromise_;
+}
+
+async function wcRefreshJobSearchInBackgroundV7428_(){
+  try{
+    const fresh=
+      await wcLoadSharedMatchingJobs_(true);
+
+    if(!Array.isArray(fresh)||!fresh.length){
+      return false;
+    }
+
+    jobSearchItems=
+      fresh.map(
+        wcPrepareJobSearchItem_
+      );
+
+    jobSearchLoaded=true;
+
+    matchingJobItems=fresh;
+    matchingJobsLoaded=true;
+
+    fillJobSearchFilters();
+    updateJobRangeLabels();
+    renderJobSearchResults();
+
+    return true;
+
+  }catch(error){
+    // バックグラウンド更新失敗は画面にエラーを出さない。
+    console.warn(
+      "案件バックグラウンド更新をスキップ",
+      error
+    );
+    return false;
+  }
 }
 
 function wcInjectRuntimeFixStyles_(){
@@ -1635,19 +1737,110 @@ function setJobPayUnit_(unit){
 }
 function inferCareer(x){const t=normalizeJobText([x.shopName,x.originalText,x.sourceCompany].join(" "));if(/docomo|ドコモ/.test(t))return "docomo";if(/softbank|ソフトバンク|\bsb\b/.test(t))return "SB";if(/\bau\b|エーユー/.test(t))return "au";if(/楽天|rakuten/.test(t))return "楽天";return "その他";}
 async function loadJobSearchOnce(){
-  if(jobSearchLoaded){renderJobSearchResults();return;}
-  showWcLoading_("案件を読み込み中…");
-  try{
-    // WC-7.42.7: GAS更新後の古い5分キャッシュを掴まないよう初回は強制更新。
-    const items=await wcLoadSharedMatchingJobs_(true);
-    jobSearchItems=(items||[]).map(wcPrepareJobSearchItem_);
+  if(jobSearchLoaded){
+    renderJobSearchResults();
+    return;
+  }
+
+  /*
+   * WC-7.42.8
+   * 1) メモリキャッシュ
+   * 2) 端末永続キャッシュ
+   * 3) ネットワーク
+   * の順で使う。
+   *
+   * キャッシュがあれば先に画面を出し、
+   * 最新取得はバックグラウンドで行う。
+   */
+  let cachedItems=null;
+
+  if(
+    Array.isArray(wcSharedMatchingJobs_) &&
+    wcSharedMatchingJobs_.length
+  ){
+    cachedItems=
+      wcSharedMatchingJobs_;
+  }else{
+    const stored=
+      wcReadPersistentMatchingJobsV7428_();
+
+    if(stored){
+      cachedItems=
+        stored.items;
+
+      wcSharedMatchingJobs_=
+        stored.items;
+
+      wcSharedMatchingJobsLoadedAt_=
+        stored.at;
+    }
+  }
+
+  if(
+    Array.isArray(cachedItems) &&
+    cachedItems.length
+  ){
+    jobSearchItems=
+      cachedItems.map(
+        wcPrepareJobSearchItem_
+      );
+
     jobSearchLoaded=true;
-    // マッチング側にも同じ配列を流用できるようにする。
-    matchingJobItems=items||[];
-    matchingJobsLoaded=Array.isArray(items);
-    fillJobSearchFilters();updateJobRangeLabels();renderJobSearchResults();
-  }catch(e){$("jobSearchResults").innerHTML=`<div class="error">${esc(e.message||"案件を取得できませんでした。")}</div>`;}
-  finally{await hideWcLoading_();}
+
+    matchingJobItems=
+      cachedItems;
+
+    matchingJobsLoaded=true;
+
+    fillJobSearchFilters();
+    updateJobRangeLabels();
+    renderJobSearchResults();
+
+    // 待たせず最新化。失敗しても現在の検索結果を残す。
+    wcRefreshJobSearchInBackgroundV7428_();
+    return;
+  }
+
+  showWcLoading_(
+    "案件を読み込み中…"
+  );
+
+  try{
+    // キャッシュが一度も無い端末のみ通常取得。
+    // force=true は使わない。
+    const items=
+      await wcLoadSharedMatchingJobs_(
+        false
+      );
+
+    jobSearchItems=
+      (items||[]).map(
+        wcPrepareJobSearchItem_
+      );
+
+    jobSearchLoaded=true;
+
+    matchingJobItems=
+      items||[];
+
+    matchingJobsLoaded=
+      Array.isArray(items);
+
+    fillJobSearchFilters();
+    updateJobRangeLabels();
+    renderJobSearchResults();
+
+  }catch(e){
+    $("jobSearchResults").innerHTML=
+      `<div class="error">${
+        esc(
+          e.message||
+          "案件を取得できませんでした。"
+        )
+      }</div>`;
+  }finally{
+    await hideWcLoading_();
+  }
 }
 const WC_JOB_REGION_MAP={"北海道": ["北海道"], "東北": ["青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"], "関東": ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県"], "甲信越": ["新潟県", "山梨県", "長野県"], "北陸": ["富山県", "石川県", "福井県"], "東海": ["岐阜県", "静岡県", "愛知県", "三重県"], "関西": ["滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"], "中国": ["鳥取県", "島根県", "岡山県", "広島県", "山口県"], "四国": ["徳島県", "香川県", "愛媛県", "高知県"], "九州": ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県"], "沖縄": ["沖縄県"]};
 
@@ -2493,6 +2686,54 @@ function testJobExperienceFilterV7423_(){
     passed,
     results
   };
+}
+
+
+function testJobSearchTimeoutProtectionV7428_(){
+  const loadSource=
+    String(
+      loadJobSearchOnce
+    );
+
+  const refreshSource=
+    String(
+      wcRefreshJobSearchInBackgroundV7428_
+    );
+
+  const result={
+    passed:
+      loadSource.includes(
+        "wcReadPersistentMatchingJobsV7428_"
+      ) &&
+      loadSource.includes(
+        "wcLoadSharedMatchingJobs_(\n        false"
+      ) &&
+      refreshSource.includes(
+        "catch(error)"
+      ),
+
+    cacheFirst:
+      loadSource.includes(
+        "wcReadPersistentMatchingJobsV7428_"
+      ),
+
+    noForcedForegroundRefresh:
+      !loadSource.includes(
+        "wcLoadSharedMatchingJobs_(true)"
+      ),
+
+    backgroundFailureIsNonFatal:
+      refreshSource.includes(
+        "return false"
+      )
+  };
+
+  console.log(
+    "testJobSearchTimeoutProtectionV7428_",
+    result
+  );
+
+  return result;
 }
 
 
