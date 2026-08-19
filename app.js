@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.1 - 本日の面談カードiPhoneレイアウト修正版 */
+/* WonderCraft PWA WC-7.42.2 - 東海地域検索・名古屋60分検索修正版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.1";
+const WC_PWA_BUILD="WC-7.42.2";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -31,123 +31,9 @@ function wcInjectRuntimeFixStyles_(){
   const style=document.createElement("style");
   style.id="wc742RuntimeStyles";
   style.textContent=`
-    /* WC-7.42.1 本日の面談カード */
-    .interview-card{
-      display:grid!important;
-      grid-template-columns:128px minmax(0,1fr)!important;
-      align-items:stretch!important;
-      overflow:hidden!important;
-    }
-
-    .interview-time{
-      min-width:0!important;
-      width:auto!important;
-      max-width:none!important;
-      flex:none!important;
-      box-sizing:border-box!important;
-      display:flex!important;
-      flex-direction:column!important;
-      align-items:center!important;
-      justify-content:center!important;
-      text-align:center!important;
-      overflow:hidden!important;
-    }
-
-    .interview-time strong{
-      display:block!important;
-      width:100%!important;
-      white-space:nowrap!important;
-      word-break:keep-all!important;
-      overflow-wrap:normal!important;
-      font-variant-numeric:tabular-nums!important;
-      line-height:1.05!important;
-      text-align:center!important;
-    }
-
-    .interview-time span{
-      white-space:nowrap!important;
-      word-break:keep-all!important;
-    }
-
-    .interview-body{
-      min-width:0!important;
-      width:auto!important;
-      max-width:100%!important;
-      box-sizing:border-box!important;
-      overflow:hidden!important;
-      position:relative!important;
-      z-index:1!important;
-    }
-
-    .interview-body h3{
-      max-width:100%!important;
-      overflow-wrap:anywhere!important;
-    }
-
-    .interview-body .badge{
-      display:inline-block!important;
-      max-width:100%!important;
-      white-space:normal!important;
-      overflow-wrap:anywhere!important;
-      box-sizing:border-box!important;
-    }
-
-    .interview-details{
-      min-width:0!important;
-      width:100%!important;
-      max-width:100%!important;
-      box-sizing:border-box!important;
-      overflow:hidden!important;
-    }
-
-    .interview-details > *{
-      min-width:0!important;
-    }
-
-    .home-today-row time{
-      white-space:nowrap!important;
-      word-break:keep-all!important;
-      font-variant-numeric:tabular-nums!important;
-    }
-
-    @media (max-width:600px){
-      .interview-card{
-        grid-template-columns:112px minmax(0,1fr)!important;
-      }
-
-      .interview-time{
-        padding-left:8px!important;
-        padding-right:8px!important;
-      }
-
-      .interview-time strong{
-        font-size:clamp(1.55rem,7vw,2rem)!important;
-      }
-
-      .interview-body{
-        padding-left:16px!important;
-        padding-right:14px!important;
-      }
-
-      .interview-body h3{
-        margin-top:0!important;
-      }
-
-      .interview-details{
-        font-size:.95rem!important;
-      }
-    }
-
-    @media (max-width:390px){
-      .interview-card{
-        grid-template-columns:104px minmax(0,1fr)!important;
-      }
-
-      .interview-body{
-        padding-left:14px!important;
-        padding-right:10px!important;
-      }
-    }
+    .interview-time{min-width:148px!important;width:148px!important;flex:0 0 148px!important;}
+    .interview-time strong{display:block!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important;font-variant-numeric:tabular-nums!important;line-height:1.05!important;}
+    .home-today-row time{white-space:nowrap!important;word-break:keep-all!important;font-variant-numeric:tabular-nums!important;}
   `;
   document.head.appendChild(style);
 }
@@ -1838,13 +1724,102 @@ function isTravelJob_(x){
   return /出張|全国対応|全国案件|遠方対応|宿泊/.test(text);
 }
 
-function getJobRegion_(x){
-  const pref=String(x.prefecture||"").trim();
-  for(const [region,prefs] of Object.entries(WC_JOB_REGION_MAP)){
-    if(prefs.includes(pref))return region;
+function inferJobPrefectureFromTextV7422_(x){
+  const direct=normalizePrefectureForJobSearch_(x?.prefecture);
+  if(direct)return direct;
+
+  const text=normalizeJobText([
+    x?.prefecture,
+    x?.area,
+    x?.shopName,
+    x?.originalText,
+    x?.remarks,
+    x?.location,
+    x?.nearestStation
+  ].join(" "));
+
+  const fullPrefectures=[
+    "北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県",
+    "茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県",
+    "新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県",
+    "静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県",
+    "奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県",
+    "徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県",
+    "熊本県","大分県","宮崎県","鹿児島県","沖縄県"
+  ];
+
+  const found=fullPrefectures.filter(pref=>text.includes(normalizeJobText(pref)));
+  if(found.length===1)return found[0];
+
+  // 都道府県が省略された案件向け。特に東海・名古屋検索で重要。
+  const localPrefRules=[
+    {
+      prefecture:"愛知県",
+      words:[
+        "名古屋","名駅","栄","金山","伏見","大曽根","千種","今池","藤が丘",
+        "一宮","春日井","小牧","稲沢","岩倉","日進","長久手","豊明","大府",
+        "刈谷","安城","知立","岡崎","豊田","豊橋","半田","常滑","東海市"
+      ]
+    },
+    {
+      prefecture:"岐阜県",
+      words:["岐阜市","岐阜駅","大垣","各務原","多治見","可児","美濃加茂"]
+    },
+    {
+      prefecture:"三重県",
+      words:["四日市","桑名","鈴鹿","津市","津駅","松阪","伊勢"]
+    },
+    {
+      prefecture:"静岡県",
+      words:["静岡市","静岡駅","浜松","磐田","掛川","沼津","三島","富士市"]
+    }
+  ];
+
+  const hits=localPrefRules.filter(rule=>
+    rule.words.some(word=>text.includes(normalizeJobText(word)))
+  );
+
+  return hits.length===1?hits[0].prefecture:"";
+}
+
+function inferJobRegionFromTextV7422_(x){
+  const pref=inferJobPrefectureFromTextV7422_(x);
+  if(pref){
+    for(const [region,prefs] of Object.entries(WC_JOB_REGION_MAP)){
+      if(prefs.includes(pref))return region;
+    }
   }
-  const area=String(x.area||"").trim();
-  return WC_JOB_REGION_MAP[area]?area:"";
+
+  const area=String(x?.area||"").normalize("NFKC").trim();
+  if(WC_JOB_REGION_MAP[area])return area;
+
+  const text=normalizeJobText([
+    x?.area,x?.prefecture,x?.shopName,x?.originalText,x?.remarks,x?.location
+  ].join(" "));
+
+  const regionWords={
+    "北海道":["北海道"],
+    "東北":["東北"],
+    "関東":["関東","首都圏"],
+    "甲信越":["甲信越"],
+    "北陸":["北陸"],
+    "東海":["東海","中部"],
+    "関西":["関西","近畿"],
+    "中国":["中国地方"],
+    "四国":["四国"],
+    "九州":["九州"],
+    "沖縄":["沖縄"]
+  };
+
+  for(const [region,words] of Object.entries(regionWords)){
+    if(words.some(word=>text.includes(normalizeJobText(word))))return region;
+  }
+
+  return "";
+}
+
+function getJobRegion_(x){
+  return inferJobRegionFromTextV7422_(x);
 }
 
 function getValidJobCommuteMinutes_(routeInfo){
@@ -1875,13 +1850,7 @@ function normalizePrefectureForJobSearch_(value){
 }
 
 function getJobPrefectureForStationSearch_(job){
-  const direct=normalizePrefectureForJobSearch_(job?.prefecture);
-  if(direct)return direct;
-
-  const text=[
-    job?.area,job?.shopName,job?.originalText,job?.remarks,job?.location
-  ].join(" ");
-  return normalizePrefectureForJobSearch_(text);
+  return inferJobPrefectureFromTextV7422_(job);
 }
 
 function isSamePrefectureAsSelectedOrigin_(job){
@@ -2040,6 +2009,47 @@ function getJobDisplayName_(job){
   return "案件名未設定";
 }
 
+function testTokaiRegionSearchV7422_(){
+  const tests=[
+    {
+      input:{area:"TH1",prefecture:"",shopName:"名古屋駅 徒歩5分",originalText:""},
+      region:"東海",
+      prefecture:"愛知県"
+    },
+    {
+      input:{area:"",prefecture:"",shopName:"栄エリア",originalText:"勤務場所：栄"},
+      region:"東海",
+      prefecture:"愛知県"
+    },
+    {
+      input:{area:"",prefecture:"愛知県",shopName:"",originalText:""},
+      region:"東海",
+      prefecture:"愛知県"
+    },
+    {
+      input:{area:"TH3",prefecture:"",shopName:"四日市",originalText:""},
+      region:"東海",
+      prefecture:"三重県"
+    }
+  ];
+
+  const results=tests.map(t=>({
+    region:getJobRegion_(t.input),
+    prefecture:inferJobPrefectureFromTextV7422_(t.input),
+    expectedRegion:t.region,
+    expectedPrefecture:t.prefecture
+  }));
+
+  const passed=results.every(r=>
+    r.region===r.expectedRegion &&
+    r.prefecture===r.expectedPrefecture
+  );
+
+  console.log("testTokaiRegionSearchV7422_",{passed,results});
+  return {passed,results};
+}
+
+
 function renderJobSearchResults(){
   if(!jobSearchLoaded)return;
 
@@ -2078,7 +2088,12 @@ function renderJobSearchResults(){
     const remoteOk=remoteMode==="include"||(remoteMode==="only"?remote:!remote);
     const spotDateOk=jobSearchMode!=="spot"||((!dateFrom||!jobDate||jobDate>=dateFrom)&&(!dateTo||!jobDate||jobDate<=dateTo));
     const regionOk=!region||jobRegion===region;
-    const areaOk=!area||(area===region?jobRegion===region:String(x.prefecture||"").trim()===area);
+    const resolvedPrefecture=inferJobPrefectureFromTextV7422_(x);
+    const areaOk=!area||(
+      area===region
+        ? jobRegion===region
+        : resolvedPrefecture===area
+    );
     const travelOk=includeTravel||!travel;
     // 起点駅検索の完了後は、
     // 1. 指定時間以内と確認できた案件
