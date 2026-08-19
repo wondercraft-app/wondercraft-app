@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.2 - 東海地域検索・名古屋60分検索修正版 */
+/* WonderCraft PWA WC-7.42.4 - 本人メールコード式パスワード再設定版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.2";
+const WC_PWA_BUILD="WC-7.42.4";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -295,7 +295,7 @@ function bindEvents(){
   $("systemRetryBtn")?.addEventListener("click",async()=>{showWcLoading_("再接続中…");try{await initialize(true)}finally{await hideWcLoading_(true)}});
   $("loginForm")?.addEventListener("submit",handleLogin);
   $("logoutBtn")?.addEventListener("click",logout);
-  $("forgotPasswordBtn")?.addEventListener("click",()=>showLoginMessage("パスワード再発行申請は次の段階で追加します。現在は自社担当者へご連絡ください。",false));
+  $("forgotPasswordBtn")?.addEventListener("click",startSelfPasswordResetV7424_);
   $("reloadBtn")?.addEventListener("click",handleManualReload);
   $("menuBtn")?.addEventListener("click",openAccountMenu_);
   $("userMenuBtn")?.addEventListener("click",openAccountMenu_);
@@ -490,6 +490,108 @@ async function logout(){
 }
 function showLogin(message=""){$("systemPanel").hidden=true;$("appPanel").hidden=true;$("loginPanel").hidden=false;if($("logoutBtn"))$("logoutBtn").hidden=true;if($("userMenuBtn"))$("userMenuBtn").hidden=true;if($("currentUserName"))$("currentUserName").hidden=true;if(message)showLoginMessage(message,false);setTimeout(()=>$("loginEmail")?.focus(),50)}
 function hideLogin(){$("loginPanel").hidden=true}
+
+async function startSelfPasswordResetV7424_(){
+  const defaultEmail=String($("loginEmail")?.value||"").trim();
+  const email=prompt(
+    "登録しているメールアドレスを入力してください。",
+    defaultEmail
+  );
+  if(email===null)return;
+
+  const normalized=String(email||"").trim().toLowerCase();
+  if(!normalized||!/^\S+@\S+\.\S+$/.test(normalized)){
+    showLoginMessage("正しいメールアドレスを入力してください。",true);
+    return;
+  }
+
+  try{
+    showLoginMessage("認証コードを送信しています…",false);
+    const result=await apiPost(
+      "requestPasswordReset",
+      {email:normalized},
+      {skipAuth:true}
+    );
+    showLoginMessage(
+      result?.message||"登録済みのメールアドレスであれば、6桁の認証コードを送信しました。",
+      false
+    );
+    await completeSelfPasswordResetFlowV7424_(
+      normalized,
+      result?.requestId||""
+    );
+  }catch(err){
+    showLoginMessage(err?.message||"認証コードを送信できませんでした。",true);
+  }
+}
+
+async function completeSelfPasswordResetFlowV7424_(email,requestId){
+  if(!requestId)return;
+
+  const code=prompt(
+    "メールに届いた6桁の認証コードを入力してください。\n\nコードは10分間有効です。"
+  );
+  if(code===null)return;
+
+  const normalizedCode=String(code||"").replace(/\D/g,"").slice(0,6);
+  if(!/^\d{6}$/.test(normalizedCode)){
+    showLoginMessage("認証コードは6桁の数字で入力してください。",true);
+    return;
+  }
+
+  const newPassword=prompt(
+    "新しいパスワードを入力してください。\n\n8文字以上で設定してください。"
+  );
+  if(newPassword===null)return;
+  if(String(newPassword).length<8){
+    showLoginMessage("パスワードは8文字以上にしてください。",true);
+    return;
+  }
+
+  const confirmation=prompt(
+    "確認のため、新しいパスワードをもう一度入力してください。"
+  );
+  if(confirmation===null)return;
+  if(String(newPassword)!==String(confirmation)){
+    showLoginMessage("パスワードが一致しません。",true);
+    return;
+  }
+
+  try{
+    showLoginMessage("パスワードを再設定しています…",false);
+    const result=await apiPost(
+      "completePasswordReset",
+      {
+        requestId:requestId,
+        email:email,
+        code:normalizedCode,
+        newPassword:newPassword
+      },
+      {skipAuth:true}
+    );
+
+    if($("loginEmail"))$("loginEmail").value=email;
+    if($("loginPassword")){
+      $("loginPassword").value="";
+      $("loginPassword").focus();
+    }
+
+    showLoginMessage(
+      result?.message||"パスワードを再設定しました。新しいパスワードでログインしてください。",
+      false
+    );
+  }catch(err){
+    const message=err?.message||"パスワードを再設定できませんでした。";
+    showLoginMessage(message,true);
+    if(
+      /認証コード/.test(message) &&
+      confirm("認証コードをもう一度入力しますか？")
+    ){
+      await completeSelfPasswordResetFlowV7424_(email,requestId);
+    }
+  }
+}
+
 function showLoginMessage(message,isError){const el=$("loginMessage");el.textContent=message||"";el.className=`message${message?(isError?" error":" success"):""}`}
 
 function applyRoleUi(){
@@ -604,10 +706,37 @@ async function apiGet(action,params={},api=getApi(),token=getToken()){
   return json.data;
 }
 
-async function apiPost(action,payload){
-  const response=await wcFetchWithTimeout_(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,token:getToken(),payload})});
+async function apiPost(action,payload,options={}){
+  const body={
+    wc_api:true,
+    action,
+    payload:payload||{}
+  };
+
+  if(!options.skipAuth){
+    body.token=getToken();
+  }
+
+  const response=await wcFetchWithTimeout_(
+    getApi(),
+    {
+      method:"POST",
+      redirect:"follow",
+      headers:{
+        "Content-Type":"text/plain;charset=utf-8"
+      },
+      body:JSON.stringify(body)
+    }
+  );
+
   const json=await response.json();
-  if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
+
+  if(!json.success){
+    const error=new Error(json.error||"APIエラー");
+    error.code=json.code||"API_ERROR";
+    throw error;
+  }
+
   return json.data;
 }
 
@@ -1248,7 +1377,125 @@ function showPartnerTab(tab){
 async function loadEmployeeRequests(){if(!state.user||state.user.role!=="admin")return;const panel=$("employeeRequestsPanel"),list=$("employeeRequestsList");if(!panel||!list)return;panel.hidden=true;try{const rows=await apiPost("employeeRequests",{}),pending=(rows||[]).filter(r=>r.status==="申請中");if(!pending.length){list.innerHTML="";return;}panel.hidden=false;list.innerHTML=pending.map(r=>`<div class="partner-request-card"><div class="partner-request-main"><strong>${esc(r.name||"")}</strong><div>${esc(r.email||"")}</div><small>申請日時：${esc(r.requestedAt||"")}</small></div><div class="partner-request-actions"><button class="primary" onclick="approveEmployeeRequest('${esc(r.requestId)}')">承認</button><button class="secondary" onclick="rejectEmployeeRequest('${esc(r.requestId)}')">却下</button></div></div>`).join("");}catch(err){panel.hidden=true;}}
 async function approveEmployeeRequest(requestId){if(!confirm("この社員登録を承認しますか？"))return;try{await apiPost("approveEmployee",{requestId});showToast("社員登録を承認しました。");await Promise.all([loadEmployeeRequests(),loadUsers()]);}catch(err){showToast(err?.message||"承認に失敗しました。","error");}}
 async function rejectEmployeeRequest(requestId){const reason=prompt("却下理由（任意）","");if(reason===null)return;try{await apiPost("rejectEmployee",{requestId,reason});showToast("社員登録申請を却下しました。");await loadEmployeeRequests();}catch(err){showToast(err?.message||"却下に失敗しました。","error");}}
-async function loadUsers(){if(!state.user||state.user.role!=="admin")return;const panel=$("userManagementPanel"),list=$("usersList");if(!panel||!list)return;try{const rows=await apiPost("users",{});panel.hidden=false;list.innerHTML=(rows||[]).map(u=>{const isCurrent=u.userId===state.user.userId;const action=u.status==="有効"?`<button class="secondary" ${isCurrent?"disabled":""} onclick="changeUserStatus('${esc(u.userId)}','利用停止')">利用停止</button>`:`<button class="primary" onclick="changeUserStatus('${esc(u.userId)}','有効')">利用再開</button>`;return `<div class="partner-request-card"><div class="partner-request-main"><strong>${esc(u.name||u.email||"")}</strong><div>${esc(u.email||"")} / ${esc(roleLabel(u.role))}</div><small>状態：${esc(u.status||"")}　最終ログイン：${esc(u.lastLoginAt||"-")}</small></div><div class="partner-request-actions">${action}</div></div>`;}).join("");}catch(err){panel.hidden=true;}}
+async function loadUsers(){
+  if(!state.user||state.user.role!=="admin")return;
+
+  const panel=$("userManagementPanel");
+  const list=$("usersList");
+
+  if(!panel||!list)return;
+
+  try{
+    const rows=
+      await apiPost(
+        "users",
+        {}
+      );
+
+    panel.hidden=false;
+
+    list.innerHTML=
+      (rows||[]).map(u=>{
+        const isCurrent=
+          u.userId===
+          state.user.userId;
+
+        const statusAction=
+          u.status==="有効"
+            ? `<button class="secondary" ${isCurrent?"disabled":""} onclick="changeUserStatus('${esc(u.userId)}','利用停止')">利用停止</button>`
+            : `<button class="primary" onclick="changeUserStatus('${esc(u.userId)}','有効')">利用再開</button>`;
+
+        const passwordAction=
+          `<button class="secondary" ${isCurrent?"disabled":""} onclick="resetUserPasswordV7423_('${esc(u.userId)}','${esc((u.name||u.email||"").replace(/'/g,"&#39;"))}')">パスワード再設定</button>`;
+
+        return `
+          <div class="partner-request-card">
+            <div class="partner-request-main">
+              <strong>${esc(u.name||u.email||"")}</strong>
+              <div>${esc(u.email||"")} / ${esc(roleLabel(u.role))}</div>
+              <small>状態：${esc(u.status||"")}　最終ログイン：${esc(u.lastLoginAt||"-")}</small>
+            </div>
+            <div class="partner-request-actions">
+              ${passwordAction}
+              ${statusAction}
+            </div>
+          </div>`;
+      }).join("");
+  }catch(err){
+    panel.hidden=true;
+  }
+}
+
+async function resetUserPasswordV7423_(userId,userName){
+  const label=
+    userName||"このユーザー";
+
+  const newPassword=
+    prompt(
+      `${label} の新しいログインパスワードを入力してください。\n\n8文字以上で設定してください。`
+    );
+
+  if(newPassword===null){
+    return;
+  }
+
+  if(String(newPassword).length<8){
+    alert(
+      "パスワードは8文字以上にしてください。"
+    );
+    return;
+  }
+
+  const confirmPassword=
+    prompt(
+      "確認のため、同じパスワードをもう一度入力してください。"
+    );
+
+  if(confirmPassword===null){
+    return;
+  }
+
+  if(
+    String(newPassword)!==
+    String(confirmPassword)
+  ){
+    alert(
+      "パスワードが一致しません。"
+    );
+    return;
+  }
+
+  if(
+    !confirm(
+      `${label} のパスワードを再設定します。\n\n現在ログイン中の端末はログアウトされます。よろしいですか？`
+    )
+  ){
+    return;
+  }
+
+  try{
+    const result=
+      await apiPost(
+        "resetUserPassword",
+        {
+          userId:userId,
+          newPassword:newPassword
+        }
+      );
+
+    alert(
+      result?.message||
+      "パスワードを再設定しました。"
+    );
+
+    await loadUsers();
+  }catch(err){
+    alert(
+      err?.message||
+      "パスワードを再設定できませんでした。"
+    );
+  }
+}
 async function changeUserStatus(userId,status){const label=status==="有効"?"利用を再開":"利用停止";if(!confirm(`${label}しますか？`))return;try{await apiPost("setUserStatus",{userId,status});showToast(status==="有効"?"利用を再開しました。":"利用停止にしました。");await loadUsers();}catch(err){showToast(err?.message||"更新に失敗しました。","error");}}
 
 function setRequestPanelVisible_(listId, visible){
@@ -1522,7 +1769,7 @@ function wcPrepareJobSearchItem_(x){
   if(!x||x.__wcPrepared)return x;
   const locationText=normalizeJobText([x.shopName,x.prefecture,x.area].join(" "));
   const companyText=normalizeJobText(x.sourceCompany||"");
-  const detailText=normalizeJobText([x.price,x.originalText,x.beginnerAvailability,x.remarks].join(" "));
+  const detailText=normalizeJobText([x.price,x.originalText,x.beginnerAvailability,x.remarks,x.shopName,x.sourceCompany].join(" "));
   x.__wcSearchText=[locationText,companyText,detailText].join(" ");
   x.__wcLocationText=locationText;
   x.__wcCompanyText=companyText;
@@ -1533,6 +1780,7 @@ function wcPrepareJobSearchItem_(x){
   x.__wcRemote=isRemoteJob_(x);
   x.__wcTravel=isTravelJob_(x);
   x.__wcJobDate=getJobDate_(x);
+  x.__wcBeginnerStatus=wcInferBeginnerStatusV7423_(x);
   x.__wcPrepared=true;
   return x;
 }
@@ -1549,13 +1797,93 @@ function wcKeywordTokens_(value){
   return wcNormalizeSearchQuery_(value).split(/[\s　,，、/／]+/).map(v=>v.trim()).filter(Boolean);
 }
 
-function wcBeginnerMatches_(availability,filter){
+function wcInferBeginnerStatusV7423_(x){
+  const availability=
+    normalizeJobText(
+      x?.beginnerAvailability||""
+    );
+
+  const text=
+    normalizeJobText([
+      x?.beginnerAvailability,
+      x?.originalText,
+      x?.remarks,
+      x?.shopName
+    ].join(" "));
+
+  const experiencedOnly=
+    /未経験不可|未経験ng|経験者のみ|経験者限定|経験必須|経験者必須|通信経験必須|経験者募集/.test(
+      text
+    );
+
+  const beginnerOk=
+    /未経験ok|未経験可|未経験可能|未経験歓迎|未経験者歓迎|経験不問|初心者歓迎|未経験でも|未経験の方/.test(
+      text
+    );
+
+  // 明示列を最優先。ただし「不可」の中の「可」を誤認しない。
+  if(
+    /不可|ng|経験者のみ|経験必須/.test(
+      availability
+    )
+  ){
+    return "experienced";
+  }
+
+  if(
+    /可能|未経験|ok|経験不問|歓迎/.test(
+      availability
+    ) &&
+    !/不可|ng|経験者のみ|経験必須/.test(
+      availability
+    )
+  ){
+    return "beginner_ok";
+  }
+
+  if(experiencedOnly){
+    return "experienced";
+  }
+
+  if(beginnerOk){
+    return "beginner_ok";
+  }
+
+  /*
+   * 「経験者歓迎」は未経験不可を意味しないのでunknown。
+   * 逆に「経験者：○円」の価格表記だけでも経験者限定にはしない。
+   */
+  return "unknown";
+}
+
+function wcBeginnerMatchesV7423_(x,filter){
   if(!filter)return true;
-  const t=normalizeJobText(availability||"");
-  const f=normalizeJobText(filter||"");
-  if(/不可|ng|経験者のみ|経験必須/.test(f))return /不可|ng|経験者のみ|経験必須/.test(t);
-  if(/可|ok|未経験/.test(f))return !/不可|ng|経験者のみ|経験必須/.test(t)&&/可|ok|未経験|経験不問|歓迎/.test(t);
-  return t.includes(f);
+
+  const f=
+    normalizeJobText(
+      filter||""
+    );
+
+  const status=
+    wcPrepareJobSearchItem_(x)
+      .__wcBeginnerStatus;
+
+  // UIの「経験者」系: 未経験不可/経験必須の案件。
+  if(
+    /経験者|不可|ng|経験必須/.test(f) &&
+    !/未経験/.test(f)
+  ){
+    return status==="experienced";
+  }
+
+  // UIの「未経験可」系。
+  if(
+    /未経験|可能|可|ok/.test(f)
+  ){
+    return status==="beginner_ok";
+  }
+
+  return true;
 }
 
 function wcJobKeywordScore_(x,tokens){
@@ -2050,6 +2378,72 @@ function testTokaiRegionSearchV7422_(){
 }
 
 
+function testJobExperienceFilterV7423_(){
+  const cases=[
+    {
+      job:{
+        beginnerAvailability:"可能",
+        originalText:"未経験OK！長期案件"
+      },
+      filter:"未経験可能",
+      expected:true
+    },
+    {
+      job:{
+        beginnerAvailability:"",
+        originalText:"未経験可能！研修あり"
+      },
+      filter:"未経験可能",
+      expected:true
+    },
+    {
+      job:{
+        beginnerAvailability:"",
+        originalText:"経験者のみ。通信経験必須"
+      },
+      filter:"経験者",
+      expected:true
+    },
+    {
+      job:{
+        beginnerAvailability:"不可",
+        originalText:""
+      },
+      filter:"未経験可能",
+      expected:false
+    }
+  ];
+
+  const results=
+    cases.map(c=>({
+      actual:
+        wcBeginnerMatchesV7423_(
+          c.job,
+          c.filter
+        ),
+      expected:c.expected
+    }));
+
+  const passed=
+    results.every(
+      r=>r.actual===r.expected
+    );
+
+  console.log(
+    "testJobExperienceFilterV7423_",
+    {
+      passed,
+      results
+    }
+  );
+
+  return {
+    passed,
+    results
+  };
+}
+
+
 function renderJobSearchResults(){
   if(!jobSearchLoaded)return;
 
@@ -2141,7 +2535,7 @@ function renderJobSearchResults(){
     return modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&commuteOk&&payOk&&
       (!company||x.sourceCompany===company)&&
       (!career||x.__wcCareer===career)&&
-      wcBeginnerMatches_(x.beginnerAvailability,beginner)&&
+      wcBeginnerMatchesV7423_(x,beginner)&&
       (!qTokens.length||qTokens.every(token=>text.includes(token)));
   });
 
