@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.4 - 本人メールコード式パスワード再設定版 */
+/* WonderCraft PWA WC-7.42.5 - ログイン安全化・本人メール再設定版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.4";
+const WC_PWA_BUILD="WC-7.42.5";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -507,10 +507,9 @@ async function startSelfPasswordResetV7424_(){
 
   try{
     showLoginMessage("認証コードを送信しています…",false);
-    const result=await apiPost(
+    const result=await publicApiPostV7425_(
       "requestPasswordReset",
-      {email:normalized},
-      {skipAuth:true}
+      {email:normalized}
     );
     showLoginMessage(
       result?.message||"登録済みのメールアドレスであれば、6桁の認証コードを送信しました。",
@@ -559,15 +558,14 @@ async function completeSelfPasswordResetFlowV7424_(email,requestId){
 
   try{
     showLoginMessage("パスワードを再設定しています…",false);
-    const result=await apiPost(
+    const result=await publicApiPostV7425_(
       "completePasswordReset",
       {
         requestId:requestId,
         email:email,
         code:normalizedCode,
         newPassword:newPassword
-      },
-      {skipAuth:true}
+      }
     );
 
     if($("loginEmail"))$("loginEmail").value=email;
@@ -706,17 +704,19 @@ async function apiGet(action,params={},api=getApi(),token=getToken()){
   return json.data;
 }
 
-async function apiPost(action,payload,options={}){
-  const body={
-    wc_api:true,
-    action,
-    payload:payload||{}
-  };
+async function apiPost(action,payload){
+  const response=await wcFetchWithTimeout_(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,token:getToken(),payload})});
+  const json=await response.json();
+  if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
+  return json.data;
+}
 
-  if(!options.skipAuth){
-    body.token=getToken();
-  }
-
+/**
+ * WC-7.42.5
+ * パスワード再設定など、ログイン前にだけ使う公開API。
+ * 通常ログイン用 apiPost() とは完全に分離する。
+ */
+async function publicApiPostV7425_(action,payload){
   const response=await wcFetchWithTimeout_(
     getApi(),
     {
@@ -725,20 +725,30 @@ async function apiPost(action,payload,options={}){
       headers:{
         "Content-Type":"text/plain;charset=utf-8"
       },
-      body:JSON.stringify(body)
+      body:JSON.stringify({
+        wc_api:true,
+        action:action,
+        payload:payload||{}
+      })
     }
   );
 
   const json=await response.json();
 
   if(!json.success){
-    const error=new Error(json.error||"APIエラー");
-    error.code=json.code||"API_ERROR";
+    const error=new Error(
+      json.error||
+      "APIエラー"
+    );
+    error.code=
+      json.code||
+      "API_ERROR";
     throw error;
   }
 
   return json.data;
 }
+
 
 async function loadFilters(){try{const o=await apiGet("filters");state.progressStatuses=o.progressStatuses||[];fillSelect("staffFilter",o.staff||[],"担当者：全員");fillSelect("regionFilter",o.regions||[],"地域：すべて")}catch(e){showError(e)}}
 function fillSelect(id,items,first){const el=$(id),old=el.value;el.innerHTML=`<option value="">${first}</option>`;items.forEach(v=>el.insertAdjacentHTML("beforeend",`<option value="${esc(v)}">${esc(v)}</option>`));el.value=old}
