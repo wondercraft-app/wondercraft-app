@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.43.1 - 長期案件スポット誤判定修正版 */
+/* WonderCraft PWA WC-7.43.2 - 未経験不可除外厳格化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.43.1";
+const WC_PWA_BUILD="WC-7.43.2";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -12,8 +12,8 @@ let wcSharedMatchingJobsPromise_=null;
 let wcSharedMatchingJobsLoadedAt_=0;
 const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
 
-const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7431";
-const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7431";
+const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7432";
+const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7432";
 const WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_=6*60*60*1000;
 
 function wcReadPersistentMatchingJobsV7428_(){
@@ -2161,9 +2161,14 @@ function wcExperienceFilterModeV7430_(filter){
   return "any";
 }
 
-function wcExperienceEligibleV7430_(x,filter){
+function wcExperienceEligibleV7432_(x,filter){
   const mode=wcExperienceFilterModeV7430_(filter);
   if(mode==="any")return true;
+
+  const availability=
+    normalizeJobText(
+      x?.beginnerAvailability||""
+    );
 
   const raw=normalizeJobText([
     x?.beginnerAvailability,
@@ -2176,21 +2181,43 @@ function wcExperienceEligibleV7430_(x,filter){
   const beginnerOnly=
     /未経験者限定|未経験限定|初心者限定/.test(raw);
 
+  const availabilityExplicitNg=
+    /^(不可|ng|×|✕|✖)$/.test(
+      availability
+    ) ||
+    /未経験不可|未経験ng|経験必須|経験者のみ|経験者限定/.test(
+      availability
+    );
+
+  const textExplicitNg=
+    /未経験\s*(?:可否)?\s*(?:[:：=／\/・-]\s*)?(?:不可|ng|×|✕|✖)/.test(
+      raw
+    ) ||
+    /未経験者?\s*(?:不可|ng)/.test(
+      raw
+    ) ||
+    /経験者のみ|経験者限定|経験必須|経験者必須|通信経験必須|実務経験必須/.test(
+      raw
+    );
+
   const definitelyExperiencedOnly=
-    /未経験不可|未経験ng|未経験者不可|経験者のみ|経験者限定|経験必須|経験者必須|通信経験必須/.test(raw) ||
-    /(?:未経験可否|未経験)[：:\s]*(?:不可|ng)/.test(raw);
+    availabilityExplicitNg ||
+    textExplicitNg;
 
   if(mode==="experienced"){
-    // 経験者は未経験可案件にも応募できる。
     return !beginnerOnly;
   }
 
   if(mode==="beginner"){
-    // 不可が明記されている案件だけ落とす。未記載は候補に残す。
     return !definitelyExperiencedOnly;
   }
 
   return true;
+}
+
+// 既存呼び出し互換
+function wcExperienceEligibleV7430_(x,filter){
+  return wcExperienceEligibleV7432_(x,filter);
 }
 
 function wcBeginnerMatchesV7423_(x,filter){
@@ -2860,6 +2887,51 @@ function testTokaiLongTermClassificationV7431_(){
   return result;
 }
 
+function testBeginnerStrictExclusionV7432_(){
+  const cases=[
+    {
+      job:{beginnerAvailability:"不可",originalText:""},
+      expected:false
+    },
+    {
+      job:{beginnerAvailability:"",originalText:"未経験不可"},
+      expected:false
+    },
+    {
+      job:{beginnerAvailability:"",originalText:"経験必須"},
+      expected:false
+    },
+    {
+      job:{beginnerAvailability:"可能",originalText:"未経験OK"},
+      expected:true
+    },
+    {
+      job:{beginnerAvailability:"",originalText:"経験者歓迎"},
+      expected:true
+    }
+  ];
+
+  const results=cases.map(c=>({
+    actual:wcExperienceEligibleV7432_(
+      c.job,
+      "未経験可能"
+    ),
+    expected:c.expected
+  }));
+
+  const passed=results.every(
+    r=>r.actual===r.expected
+  );
+
+  console.log(
+    "testBeginnerStrictExclusionV7432_",
+    {passed,results}
+  );
+
+  return {passed,results};
+}
+
+
 function renderJobSearchResults(){
   if(!jobSearchLoaded)return;
 
@@ -2975,60 +3047,10 @@ function renderJobSearchResults(){
   });
 
   /*
-   * WC-7.43.0 safety net:
-   * 経験条件を選ぶ前には候補があるのに、経験条件だけで全件0になる場合は、
-   * 旧UIの想定外valueや古いキャッシュによる誤全落ちと判断する。
-   * その場合は経験条件を「要確認」として候補を戻す。
+   * WC-7.43.2
+   * 経験条件で0件でも候補を復元しない。
+   * 未経験不可案件を未経験可能検索へ戻さないことを優先する。
    */
-  if(beginner && experienceBaseCount>0 && experiencePassedCount===0){
-    console.warn(
-      "経験条件で全件0を検知。安全フォールバックを適用",
-      {
-        beginner,
-        experienceBaseCount,
-        experiencePassedCount
-      }
-    );
-
-    items=jobSearchItems.filter(x=>{
-      x=wcPrepareJobSearchItem_(x);
-      const text=x.__wcSearchText;
-      const pay=x.__wcPay;
-      const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
-      const commute=originStation
-        ? getValidJobCommuteMinutes_(routeInfo)
-        : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
-      const jobRegion=x.__wcRegion;
-      const travel=x.__wcTravel;
-      const spot=x.__wcSpot;
-      const remote=x.__wcRemote;
-      const jobDate=x.__wcJobDate;
-      const modeOk=jobSearchMode==="spot"?spot:!spot;
-      const remoteOk=remoteMode==="include"||(remoteMode==="only"?remote:!remote);
-      const spotDateOk=jobSearchMode!=="spot"||((!dateFrom||!jobDate||jobDate>=dateFrom)&&(!dateTo||!jobDate||jobDate<=dateTo));
-      const regionOk=!region||jobRegion===region;
-      const resolvedPrefecture=inferJobPrefectureFromTextV7422_(x);
-      const areaOk=!area||(area===region?jobRegion===region:resolvedPrefecture===area);
-      const travelOk=includeTravel||!travel;
-      const textCandidateReason=getJobTextCandidateReason_(x,originStation,maxMinutes);
-      const areaCompatible=isOriginAreaCompatible_(x,originStation);
-      const isUndecidedLocationJob=isNearestSelectionJob_(x);
-      const samePrefecture=isSamePrefectureAsSelectedOrigin_(x);
-      const commuteOk=!originStation
-        ? true
-        : (!jobStationSearchApplied
-            ? true
-            : (commute!==null
-                ? commute<=maxMinutes
-                : (samePrefecture&&areaCompatible&&(isUndecidedLocationJob||!!textCandidateReason))));
-      const payOk=!pay||(pay>=min&&pay<=max);
-
-      return modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&commuteOk&&payOk&&
-        (!company||x.sourceCompany===company)&&
-        (!career||x.__wcCareer===career)&&
-        (!qTokens.length||qTokens.every(token=>text.includes(token)));
-    });
-  }
 
   jobSearchCurrentItems=items.slice();
 
