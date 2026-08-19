@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.43.0 - 経験条件検索完全修正版 */
+/* WonderCraft PWA WC-7.43.1 - 長期案件スポット誤判定修正版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.43.0";
+const WC_PWA_BUILD="WC-7.43.1";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -12,8 +12,8 @@ let wcSharedMatchingJobsPromise_=null;
 let wcSharedMatchingJobsLoadedAt_=0;
 const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
 
-const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7430";
-const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7430";
+const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7431";
+const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7431";
 const WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_=6*60*60*1000;
 
 function wcReadPersistentMatchingJobsV7428_(){
@@ -2844,6 +2844,22 @@ function testExperienceSearchCountsV7427_(){
 }
 
 
+function testTokaiLongTermClassificationV7431_(){
+  const prepared=(jobSearchItems||[]).map(wcPrepareJobSearchItem_);
+  const tokai=prepared.filter(x=>x.__wcRegion==="東海");
+  const longTerm=tokai.filter(x=>!x.__wcSpot);
+  const spot=tokai.filter(x=>x.__wcSpot);
+  const result={
+    total:prepared.length,
+    tokai:tokai.length,
+    tokaiLongTerm:longTerm.length,
+    tokaiSpot:spot.length,
+    passed:tokai.length>0&&longTerm.length>0
+  };
+  console.log("testTokaiLongTermClassificationV7431_",result);
+  return result;
+}
+
 function renderJobSearchResults(){
   if(!jobSearchLoaded)return;
 
@@ -3124,13 +3140,19 @@ function normalizeSpotDate_(value){
 }
 
 function getJobDate_(job){
+  /*
+   * WC-7.43.1
+   * matchingJobs API の job.date は案件管理表の「更新日」。
+   * スポット稼働日ではないため検索日付判定には使わない。
+   */
   for(const value of [
     job.workDate,
     job.startDate,
-    job.date,
     job.eventDate,
-    job.updatedAt,
-    job.updateDate
+    job.shiftDate,
+    job.scheduleDate,
+    job.workDates,
+    job.eventDates
   ]){
     const date=normalizeSpotDate_(value);
     if(date)return date;
@@ -3144,10 +3166,13 @@ function getJobDate_(job){
 function isSpotJob_(job){
   if(job.isSpot===true||job.spot===true)return true;
 
+  /*
+   * WC-7.43.1
+   * job.date は更新日なので絶対にスポット根拠にしない。
+   */
   const explicitWorkDateFields=[
     job.workDate,
     job.eventDate,
-    job.date,
     job.eventDates,
     job.workDates,
     job.shiftDate,
@@ -3167,7 +3192,6 @@ function isSpotJob_(job){
     job.remarks,
     job.workDate,
     job.eventDate,
-    job.date,
     job.period,
     job.workDays,
     job.schedule,
