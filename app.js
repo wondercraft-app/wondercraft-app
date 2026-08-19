@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.6 - 社員ログイン端末登録回避版 */
+/* WonderCraft PWA WC-7.42.7 - 経験条件検索判定修正版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.6";
+const WC_PWA_BUILD="WC-7.42.7";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -1638,7 +1638,8 @@ async function loadJobSearchOnce(){
   if(jobSearchLoaded){renderJobSearchResults();return;}
   showWcLoading_("案件を読み込み中…");
   try{
-    const items=await wcLoadSharedMatchingJobs_();
+    // WC-7.42.7: GAS更新後の古い5分キャッシュを掴まないよう初回は強制更新。
+    const items=await wcLoadSharedMatchingJobs_(true);
     jobSearchItems=(items||[]).map(wcPrepareJobSearchItem_);
     jobSearchLoaded=true;
     // マッチング側にも同じ配列を流用できるようにする。
@@ -1791,7 +1792,8 @@ function resolveOriginStationSelection_(){
 }
 
 function wcPrepareJobSearchItem_(x){
-  if(!x||x.__wcPrepared)return x;
+  if(!x)return x;
+  if(x.__wcPrepared && x.__wcPreparedBuild===WC_PWA_BUILD)return x;
   const locationText=normalizeJobText([x.shopName,x.prefecture,x.area].join(" "));
   const companyText=normalizeJobText(x.sourceCompany||"");
   const detailText=normalizeJobText([x.price,x.originalText,x.beginnerAvailability,x.remarks,x.shopName,x.sourceCompany].join(" "));
@@ -1806,6 +1808,7 @@ function wcPrepareJobSearchItem_(x){
   x.__wcTravel=isTravelJob_(x);
   x.__wcJobDate=getJobDate_(x);
   x.__wcBeginnerStatus=wcInferBeginnerStatusV7423_(x);
+  x.__wcPreparedBuild=WC_PWA_BUILD;
   x.__wcPrepared=true;
   return x;
 }
@@ -1881,34 +1884,58 @@ function wcInferBeginnerStatusV7423_(x){
   return "unknown";
 }
 
-function wcBeginnerMatchesV7423_(x,filter){
+function wcBeginnerMatchesV7427_(x,filter){
   if(!filter)return true;
 
-  const f=
-    normalizeJobText(
-      filter||""
-    );
+  const f=normalizeJobText(filter||"");
+  const prepared=wcPrepareJobSearchItem_(x);
+  const status=prepared.__wcBeginnerStatus;
 
-  const status=
-    wcPrepareJobSearchItem_(x)
-      .__wcBeginnerStatus;
+  /*
+   * WC-7.42.7
+   * 「経験者」は経験必須案件だけに限定しない。
+   * 経験者は未経験可案件にも応募可能なので、原則すべて候補。
+   *
+   * 「未経験可能」は、未経験不可 / 経験必須だけを除外。
+   * 未経験可否が未記載の案件も候補に残す。
+   */
+  const raw=normalizeJobText([
+    x?.beginnerAvailability,
+    x?.originalText,
+    x?.remarks,
+    x?.shopName
+  ].join(" "));
 
-  // UIの「経験者」系: 未経験不可/経験必須の案件。
+  const beginnerOnly=
+    /未経験者限定|未経験限定|初心者限定/.test(raw);
+
   if(
-    /経験者|不可|ng|経験必須/.test(f) &&
+    /経験者|経験あり|experienced/.test(f) &&
     !/未経験/.test(f)
   ){
+    return !beginnerOnly;
+  }
+
+  if(
+    /未経験|初心者|beginner/.test(f) ||
+    /未経験可|未経験可能|未経験ok/.test(f)
+  ){
+    return status!=="experienced";
+  }
+
+  if(/^(可|可能|ok)$/.test(f)){
+    return status!=="experienced";
+  }
+
+  if(/不可|ng|経験必須/.test(f)){
     return status==="experienced";
   }
 
-  // UIの「未経験可」系。
-  if(
-    /未経験|可能|可|ok/.test(f)
-  ){
-    return status==="beginner_ok";
-  }
-
   return true;
+}
+
+function wcBeginnerMatchesV7423_(x,filter){
+  return wcBeginnerMatchesV7427_(x,filter);
 }
 
 function wcJobKeywordScore_(x,tokens){
@@ -2466,6 +2493,47 @@ function testJobExperienceFilterV7423_(){
     passed,
     results
   };
+}
+
+
+function testExperienceSearchCountsV7427_(){
+  const prepared=(jobSearchItems||[]).map(wcPrepareJobSearchItem_);
+
+  const result={
+    total:prepared.length,
+    experienced:
+      prepared.filter(
+        x=>wcBeginnerMatchesV7427_(x,"経験者")
+      ).length,
+    beginner:
+      prepared.filter(
+        x=>wcBeginnerMatchesV7427_(x,"未経験可能")
+      ).length,
+    explicitExperienced:
+      prepared.filter(
+        x=>x.__wcBeginnerStatus==="experienced"
+      ).length,
+    explicitBeginner:
+      prepared.filter(
+        x=>x.__wcBeginnerStatus==="beginner_ok"
+      ).length,
+    unknown:
+      prepared.filter(
+        x=>x.__wcBeginnerStatus==="unknown"
+      ).length
+  };
+
+  result.passed=
+    result.total>0 &&
+    result.experienced>0 &&
+    result.beginner>0;
+
+  console.log(
+    "testExperienceSearchCountsV7427_",
+    result
+  );
+
+  return result;
 }
 
 
