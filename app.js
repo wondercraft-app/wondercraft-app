@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.5 - ログイン安全化・本人メール再設定版 */
+/* WonderCraft PWA WC-7.42.6 - 社員ログイン端末登録回避版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.5";
+const WC_PWA_BUILD="WC-7.42.6";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -446,7 +446,9 @@ async function initialize(force=false){
       clearToken();
       state.user=null;
       updateUserUi();
-      return showLogin("ログインの有効期限が切れました。もう一度ログインしてください。");
+      return showLogin(
+        "ログインが必要です。メールアドレスとパスワードを入力してください。"
+      );
     }
 
     /*
@@ -617,7 +619,20 @@ function applyRoleUi(){
 
 function updateUserUi(){const logged=!!state.user;if($("logoutBtn"))$("logoutBtn").hidden=true;if($("userMenuBtn"))$("userMenuBtn").hidden=!logged;if($("currentUserName")){$("currentUserName").hidden=!logged;$("currentUserName").textContent=logged?`${state.user.name||state.user.email}（${roleLabel(state.user.role)}）`:""}if(logged){if($("menuUserName"))$("menuUserName").textContent=state.user.name||state.user.email;if($("menuUserEmail"))$("menuUserEmail").textContent=state.user.email||"";}}
 function roleLabel(role){return role==="admin"?"管理者":role==="staff"?"自社社員":"他企業"}
-function isAuthError(error){return ["AUTH_REQUIRED","SESSION_INVALID","SESSION_EXPIRED","USER_DISABLED","ROLE_DENIED"].includes(error.code)}
+function isAuthError(error){
+  return [
+    "AUTH_REQUIRED",
+    "SESSION_INVALID",
+    "SESSION_EXPIRED",
+    "USER_DISABLED",
+    "ROLE_DENIED",
+    "DEVICE_ENROLL_REQUIRED",
+    "DEVICE_TOKEN_INVALID",
+    "DEVICE_TOKEN_EXPIRED"
+  ].includes(
+    error?.code
+  );
+}
 
 function getApi(){return String(config.GAS_API_URL||"").trim().replace(/\/+$/,"")}
 function getDeviceName(){const platform=navigator.userAgentData?.platform||navigator.platform||"端末";const mobile=/iPhone|iPad|Android|Mobile/i.test(navigator.userAgent)?"スマホ":"PC";return `${mobile} / ${platform}`.slice(0,100)}
