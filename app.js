@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.42.8 - 案件検索タイムアウト耐性版 */
+/* WonderCraft PWA WC-7.42.9 - 起動修復・スプラッシュ無回転版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.42.8";
+const WC_PWA_BUILD="WC-7.42.9";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -12,7 +12,7 @@ let wcSharedMatchingJobsPromise_=null;
 let wcSharedMatchingJobsLoadedAt_=0;
 const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
 
-async const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7428";
+const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7428";
 const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7428";
 const WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_=6*60*60*1000;
 
@@ -133,6 +133,12 @@ function wcInjectRuntimeFixStyles_(){
   const style=document.createElement("style");
   style.id="wc742RuntimeStyles";
   style.textContent=`
+    /* WC-7.42.9: ロゴ画面中は読み込みのぐるぐるを出さない */
+    body:has(#splash:not(.hide)) #wcLoadingOverlay{
+      display:none!important;
+      visibility:hidden!important;
+      opacity:0!important;
+    }
     .interview-time{min-width:148px!important;width:148px!important;flex:0 0 148px!important;}
     .interview-time strong{display:block!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important;font-variant-numeric:tabular-nums!important;line-height:1.05!important;}
     .home-today-row time{white-space:nowrap!important;word-break:keep-all!important;font-variant-numeric:tabular-nums!important;}
@@ -187,15 +193,15 @@ function isAnyMainScreenVisible_(){
 
 
 window.addEventListener("load",async()=>{
-  wcLoadingDepth=1;
-  wcLoadingShownAt=Date.now();
+  /* WC-7.42.9: ロゴ画面中はグローバルローダーを表示しない */
+  wcLoadingDepth=0;
+  wcLoadingShownAt=0;
+  forceHideWcLoader_();
 
   setTimeout(()=>{
     $("splash")?.classList.add("hide");
     setTimeout(()=>$("splash")?.remove(),450);
   },900);
-
-  updateWcLoadingText_("読み込み中…");
 
   const watchdog=setTimeout(()=>{
     console.warn("WonderCraft startup watchdog fired");
@@ -324,6 +330,13 @@ let wcLoadingDepth = 0;
 let wcLoadingShownAt = 0;
 const WC_LOADING_MIN_MS = 800;
 function showWcLoading_(message){
+  const splash = $("splash");
+
+  // ロゴ画面中はローディングオーバーレイを出さない。
+  if(splash && !splash.classList.contains("hide")){
+    return;
+  }
+
   const overlay = $("wcLoadingOverlay");
   const text = $("wcLoadingText");
 
