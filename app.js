@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.43.2 - 未経験不可除外厳格化版 */
+/* WonderCraft PWA WC-7.43.3 - 構造化案件検索版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.43.2";
+const WC_PWA_BUILD="WC-7.43.3";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -12,8 +12,8 @@ let wcSharedMatchingJobsPromise_=null;
 let wcSharedMatchingJobsLoadedAt_=0;
 const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
 
-const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7432";
-const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7432";
+const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7433";
+const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7433";
 const WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_=6*60*60*1000;
 
 function wcReadPersistentMatchingJobsV7428_(){
@@ -2002,7 +2002,22 @@ function wcPrepareJobSearchItem_(x){
   if(x.__wcPrepared && x.__wcPreparedBuild===WC_PWA_BUILD)return x;
   const locationText=normalizeJobText([x.shopName,x.prefecture,x.area].join(" "));
   const companyText=normalizeJobText(x.sourceCompany||"");
-  const detailText=normalizeJobText([x.price,x.originalText,x.beginnerAvailability,x.remarks,x.shopName,x.sourceCompany].join(" "));
+  const detailText=normalizeJobText([
+    x.price,
+    x.originalText,
+    x.beginnerAvailability,
+    x.experienceClass,
+    x.carrier,
+    x.structuredJobType,
+    x.workStyle,
+    x.municipality,
+    x.nearestStation,
+    x.startTiming,
+    x.remarks,
+    x.shopName,
+    x.normalizedShop,
+    x.sourceCompany
+  ].join(" "));
   x.__wcSearchText=[locationText,companyText,detailText].join(" ");
   x.__wcLocationText=locationText;
   x.__wcCompanyText=companyText;
@@ -2161,55 +2176,78 @@ function wcExperienceFilterModeV7430_(filter){
   return "any";
 }
 
-function wcExperienceEligibleV7432_(x,filter){
-  const mode=wcExperienceFilterModeV7430_(filter);
-  if(mode==="any")return true;
+function wcExperienceEligibleV7433_(x,filter){
+  const mode=
+    wcExperienceFilterModeV7430_(
+      filter
+    );
+
+  if(mode==="any"){
+    return true;
+  }
+
+  const structured=
+    normalizeJobText(
+      x?.experienceClass||""
+    );
+
+  /*
+   * WC-7.43.3
+   * M列「経験区分」を最優先。
+   * K列の旧データや原文推測はフォールバックだけにする。
+   */
+  if(structured){
+    if(mode==="beginner"){
+      return structured==="未経験可";
+    }
+
+    if(mode==="experienced"){
+      return (
+        structured==="経験必須" ||
+        structured==="経験者優先" ||
+        structured==="未経験可"
+      );
+    }
+  }
 
   const availability=
     normalizeJobText(
       x?.beginnerAvailability||""
     );
 
-  const raw=normalizeJobText([
-    x?.beginnerAvailability,
-    x?.originalText,
-    x?.remarks,
-    x?.shopName,
-    x?.sourceCompany
-  ].join(" "));
+  if(mode==="beginner"){
+    if(/可能|未経験可|ok/.test(availability)){
+      return true;
+    }
 
-  const beginnerOnly=
-    /未経験者限定|未経験限定|初心者限定/.test(raw);
-
-  const availabilityExplicitNg=
-    /^(不可|ng|×|✕|✖)$/.test(
-      availability
-    ) ||
-    /未経験不可|未経験ng|経験必須|経験者のみ|経験者限定/.test(
-      availability
-    );
-
-  const textExplicitNg=
-    /未経験\s*(?:可否)?\s*(?:[:：=／\/・-]\s*)?(?:不可|ng|×|✕|✖)/.test(
-      raw
-    ) ||
-    /未経験者?\s*(?:不可|ng)/.test(
-      raw
-    ) ||
-    /経験者のみ|経験者限定|経験必須|経験者必須|通信経験必須|実務経験必須/.test(
-      raw
-    );
-
-  const definitelyExperiencedOnly=
-    availabilityExplicitNg ||
-    textExplicitNg;
-
-  if(mode==="experienced"){
-    return !beginnerOnly;
+    if(/不可|経験必須|ng/.test(availability)){
+      return false;
+    }
   }
 
+  const raw=
+    normalizeJobText([
+      x?.originalText,
+      x?.remarks,
+      x?.shopName
+    ].join(" "));
+
+  const explicitNg=
+    /未経験不可|未経験ng|経験者のみ|経験者限定|経験必須|経験者必須|通信経験必須|実務経験必須|登録経験必須|ワンオペ.*必須/.test(raw);
+
+  const explicitOk=
+    /未経験ok|未経験可|未経験可能|未経験歓迎|未経験者歓迎|経験不問|初心者歓迎/.test(raw);
+
+  const preferred=
+    /経験者歓迎|経験者優遇|経験者優先/.test(raw);
+
   if(mode==="beginner"){
-    return !definitelyExperiencedOnly;
+    return explicitOk && !explicitNg;
+  }
+
+  if(mode==="experienced"){
+    return !/未経験者限定|未経験限定/.test(raw) &&
+      (explicitNg||preferred||explicitOk||true);
   }
 
   return true;
@@ -2217,7 +2255,7 @@ function wcExperienceEligibleV7432_(x,filter){
 
 // 既存呼び出し互換
 function wcExperienceEligibleV7430_(x,filter){
-  return wcExperienceEligibleV7432_(x,filter);
+  return wcExperienceEligibleV7433_(x,filter);
 }
 
 function wcBeginnerMatchesV7423_(x,filter){
@@ -2912,7 +2950,7 @@ function testBeginnerStrictExclusionV7432_(){
   ];
 
   const results=cases.map(c=>({
-    actual:wcExperienceEligibleV7432_(
+    actual:wcExperienceEligibleV7433_(
       c.job,
       "未経験可能"
     ),
@@ -2929,6 +2967,51 @@ function testBeginnerStrictExclusionV7432_(){
   );
 
   return {passed,results};
+}
+
+
+function testStructuredExperienceSearchV7433_(){
+  const items=
+    (jobSearchItems||[])
+      .map(
+        wcPrepareJobSearchItem_
+      );
+
+  const result={
+    total:items.length,
+    structured:
+      items.filter(
+        x=>String(
+          x.experienceClass||""
+        ).trim()!==""
+      ).length,
+    beginner:
+      items.filter(
+        x=>wcExperienceEligibleV7433_(
+          x,
+          "未経験可能"
+        )
+      ).length,
+    experienced:
+      items.filter(
+        x=>wcExperienceEligibleV7433_(
+          x,
+          "経験者"
+        )
+      ).length
+  };
+
+  result.passed=
+    result.total>0 &&
+    result.structured>0 &&
+    result.beginner>0;
+
+  console.log(
+    "testStructuredExperienceSearchV7433_",
+    result
+  );
+
+  return result;
 }
 
 
