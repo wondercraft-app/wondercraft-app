@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.43.3 - 構造化案件検索版 */
+/* WonderCraft PWA WC-7.43.5 - 全原文分析ベース経験検索版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.43.3";
+const WC_PWA_BUILD="WC-7.43.5";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -12,8 +12,8 @@ let wcSharedMatchingJobsPromise_=null;
 let wcSharedMatchingJobsLoadedAt_=0;
 const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
 
-const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7433";
-const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7433";
+const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7435";
+const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7435";
 const WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_=6*60*60*1000;
 
 function wcReadPersistentMatchingJobsV7428_(){
@@ -2013,6 +2013,13 @@ function wcPrepareJobSearchItem_(x){
     x.municipality,
     x.nearestStation,
     x.startTiming,
+    x.requiredExperienceTags,
+    x.requiredExperiencePeriods,
+    x.preferredExperienceTags,
+    x.socialExperienceCondition,
+    x.requiredSkillTags,
+    x.experienceSummary,
+    x.searchTags,
     x.remarks,
     x.shopName,
     x.normalizedShop,
@@ -2198,14 +2205,33 @@ function wcExperienceEligibleV7433_(x,filter){
    */
   if(structured){
     if(mode==="beginner"){
+      /*
+       * 未経験検索:
+       * - 未経験可 → 採用
+       * - 条件記載なし → 候補として採用
+       * - 要確認 / 経験者優先 / 経験必須 → 除外
+       *
+       * 「経験必須」は絶対に混ぜない。
+       */
+      /*
+       * WC-7.43.5:
+       * 「未経験可能」は精度優先。
+       * 条件記載なしを勝手に未経験可へ含めない。
+       */
       return structured==="未経験可";
     }
 
     if(mode==="experienced"){
+      /*
+       * 経験者はほぼ全案件を候補にできる。
+       * 条件記載なしも含める。
+       */
       return (
         structured==="経験必須" ||
         structured==="経験者優先" ||
-        structured==="未経験可"
+        structured==="未経験可" ||
+        structured==="条件記載なし" ||
+        structured==="要確認"
       );
     }
   }
