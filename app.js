@@ -1,8 +1,8 @@
-/* WonderCraft PWA WC-7.43.7 - 安全版案件ランキングSTEP1 */
+/* WonderCraft PWA WC-7.45.0 - サーバー側案件検索・根本高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.43.7";
+const WC_PWA_BUILD="WC-7.46.0";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -12,27 +12,60 @@ let wcSharedMatchingJobsPromise_=null;
 let wcSharedMatchingJobsLoadedAt_=0;
 const WC_SHARED_JOBS_TTL_MS_=5*60*1000;
 
-const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7437";
-const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7437";
+const WC_MATCHING_JOBS_STORAGE_KEY_="wc_matching_jobs_cache_v7450";
+const WC_MATCHING_JOBS_STORAGE_AT_KEY_="wc_matching_jobs_cache_at_v7450";
 const WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_=6*60*60*1000;
 
 function wcReadPersistentMatchingJobsV7428_(){
-  try{
-    const raw=localStorage.getItem(WC_MATCHING_JOBS_STORAGE_KEY_);
-    const at=Number(localStorage.getItem(WC_MATCHING_JOBS_STORAGE_AT_KEY_)||0);
-    if(!raw||!at)return null;
-    if(Date.now()-at>WC_MATCHING_JOBS_STORAGE_MAX_AGE_MS_)return null;
+  /*
+   * WC-7.43.8
+   * バージョン更新でキャッシュキーが変わっても、
+   * 直前の安定版キャッシュを引き継ぐ。
+   */
+  const keyPairs=[
+    [WC_MATCHING_JOBS_STORAGE_KEY_,WC_MATCHING_JOBS_STORAGE_AT_KEY_],
+    ["wc_matching_jobs_cache_v7436","wc_matching_jobs_cache_at_v7436"],
+    ["wc_matching_jobs_cache_v7435","wc_matching_jobs_cache_at_v7435"],
+    ["wc_matching_jobs_cache_v7434","wc_matching_jobs_cache_at_v7434"]
+  ];
 
-    const items=JSON.parse(raw);
-    if(!Array.isArray(items)||!items.length)return null;
+  for(const pair of keyPairs){
+    try{
+      const raw=localStorage.getItem(pair[0]);
+      const at=Number(localStorage.getItem(pair[1])||0);
 
-    return {
-      items,
-      at
-    };
-  }catch(e){
-    return null;
+      if(!raw||!at)continue;
+
+      /*
+       * 初期表示用キャッシュは24時間まで許可。
+       * 最新化は検索実行時に行う。
+       */
+      if(Date.now()-at>24*60*60*1000)continue;
+
+      const items=JSON.parse(raw);
+      if(!Array.isArray(items)||!items.length)continue;
+
+      /*
+       * 旧キーから読んだ場合は現在キーへ移行。
+       */
+      if(pair[0]!==WC_MATCHING_JOBS_STORAGE_KEY_){
+        try{
+          localStorage.setItem(
+            WC_MATCHING_JOBS_STORAGE_KEY_,
+            JSON.stringify(items)
+          );
+          localStorage.setItem(
+            WC_MATCHING_JOBS_STORAGE_AT_KEY_,
+            String(at)
+          );
+        }catch(_error){}
+      }
+
+      return {items,at};
+    }catch(_error){}
   }
+
+  return null;
 }
 
 function wcWritePersistentMatchingJobsV7428_(items){
@@ -94,38 +127,12 @@ function wcLoadSharedMatchingJobs_(force=false){
 }
 
 async function wcRefreshJobSearchInBackgroundV7428_(){
-  try{
-    const fresh=
-      await wcLoadSharedMatchingJobs_(true);
-
-    if(!Array.isArray(fresh)||!fresh.length){
-      return false;
-    }
-
-    jobSearchItems=
-      fresh.map(
-        wcPrepareJobSearchItem_
-      );
-
-    jobSearchLoaded=true;
-
-    matchingJobItems=fresh;
-    matchingJobsLoaded=true;
-
-    fillJobSearchFilters();
-    updateJobRangeLabels();
-    renderJobSearchResults();
-
-    return true;
-
-  }catch(error){
-    // バックグラウンド更新失敗は画面にエラーを出さない。
-    console.warn(
-      "案件バックグラウンド更新をスキップ",
-      error
-    );
-    return false;
-  }
+  /*
+   * WC-7.43.8
+   * 案件検索の自動バックグラウンド全件取得を停止。
+   * 検索操作時のみ通信する。
+   */
+  return false;
 }
 
 function wcInjectRuntimeFixStyles_(){
@@ -1702,6 +1709,13 @@ async function rejectSkillRequest(requestId){
 
 let jobSearchLoaded=false;
 let jobSearchItems=[];
+
+/* WC-7.46.0: サーバー側案件検索ページング */
+let jobSearchServerPage_=1;
+let jobSearchServerHasMore_=false;
+let jobSearchServerNextPage_=null;
+let jobSearchServerLoadingMore_=false;
+const WC_JOB_SEARCH_PAGE_SIZE_=50;
 function normalizeJobText(v){return String(v||"").normalize("NFKC").toLowerCase();}
 function extractJobDailyPay(v){
   const text=String(v||"").normalize("NFKC").replace(/,/g,"");
@@ -1750,109 +1764,30 @@ function setJobPayUnit_(unit){
 }
 function inferCareer(x){const t=normalizeJobText([x.shopName,x.originalText,x.sourceCompany].join(" "));if(/docomo|ドコモ/.test(t))return "docomo";if(/softbank|ソフトバンク|\bsb\b/.test(t))return "SB";if(/\bau\b|エーユー/.test(t))return "au";if(/楽天|rakuten/.test(t))return "楽天";return "その他";}
 async function loadJobSearchOnce(){
-  if(jobSearchLoaded){
-    renderJobSearchResults();
-    return;
-  }
-
   /*
-   * WC-7.42.8
-   * 1) メモリキャッシュ
-   * 2) 端末永続キャッシュ
-   * 3) ネットワーク
-   * の順で使う。
-   *
-   * キャッシュがあれば先に画面を出し、
-   * 最新取得はバックグラウンドで行う。
+   * WC-7.45.0
+   * 案件検索ページを開いても全2,000件を取得しない。
+   * 検索条件を入力して検索ボタンを押すまで通信ゼロ。
    */
-  let cachedItems=null;
+  jobSearchItems=[];
+  jobSearchLoaded=true;
+  jobSearchServerPage_=1;
+  jobSearchServerHasMore_=false;
+  jobSearchServerNextPage_=null;
+  jobSearchServerLoadingMore_=false;
 
-  if(
-    Array.isArray(wcSharedMatchingJobs_) &&
-    wcSharedMatchingJobs_.length
-  ){
-    cachedItems=
-      wcSharedMatchingJobs_;
-  }else{
-    const stored=
-      wcReadPersistentMatchingJobsV7428_();
+  updateJobRangeLabels();
 
-    if(stored){
-      cachedItems=
-        stored.items;
+  const box=$("jobSearchResults");
+  const count=$("jobResultCount");
 
-      wcSharedMatchingJobs_=
-        stored.items;
-
-      wcSharedMatchingJobsLoadedAt_=
-        stored.at;
-    }
+  if(count){
+    count.textContent="0件";
   }
 
-  if(
-    Array.isArray(cachedItems) &&
-    cachedItems.length
-  ){
-    jobSearchItems=
-      cachedItems.map(
-        wcPrepareJobSearchItem_
-      );
-
-    jobSearchLoaded=true;
-
-    matchingJobItems=
-      cachedItems;
-
-    matchingJobsLoaded=true;
-
-    fillJobSearchFilters();
-    updateJobRangeLabels();
-    renderJobSearchResults();
-
-    // 待たせず最新化。失敗しても現在の検索結果を残す。
-    wcRefreshJobSearchInBackgroundV7428_();
-    return;
-  }
-
-  showWcLoading_(
-    "案件を読み込み中…"
-  );
-
-  try{
-    // キャッシュが一度も無い端末のみ通常取得。
-    // force=true は使わない。
-    const items=
-      await wcLoadSharedMatchingJobs_(
-        false
-      );
-
-    jobSearchItems=
-      (items||[]).map(
-        wcPrepareJobSearchItem_
-      );
-
-    jobSearchLoaded=true;
-
-    matchingJobItems=
-      items||[];
-
-    matchingJobsLoaded=
-      Array.isArray(items);
-
-    fillJobSearchFilters();
-    updateJobRangeLabels();
-    renderJobSearchResults();
-
-  }catch(e){
-    $("jobSearchResults").innerHTML=
-      `<div class="error">${
-        esc(
-          e.message||
-          "案件を取得できませんでした。"
-        )
-      }</div>`;
-  }finally{
-    await hideWcLoading_();
+  if(box){
+    box.innerHTML=
+      '<div class="job-search-notice compact">条件を設定して「この条件で検索する」を押してください。サーバー側で候補だけを高速抽出します。</div>';
   }
 }
 const WC_JOB_REGION_MAP={"北海道": ["北海道"], "東北": ["青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県"], "関東": ["茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県"], "甲信越": ["新潟県", "山梨県", "長野県"], "北陸": ["富山県", "石川県", "福井県"], "東海": ["岐阜県", "静岡県", "愛知県", "三重県"], "関西": ["滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県"], "中国": ["鳥取県", "島根県", "岡山県", "広島県", "山口県"], "四国": ["徳島県", "香川県", "愛媛県", "高知県"], "九州": ["福岡県", "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県"], "沖縄": ["沖縄県"]};
@@ -2368,7 +2303,165 @@ function resetJobSearch(){
   updateJobRangeLabels();
   renderJobSearchResults();
 }
-async function runStationAwareJobSearch_(){
+async function runStationAwareJobSearch_(options={}){
+  /*
+   * WC-7.46.0
+   * サーバー側検索 + 50件単位ページング。
+   * 通常検索は1ページ目を取得し直し、
+   * 「もっと見る」では次ページだけを追加取得する。
+   */
+  const append=options?.append===true;
+
+  if(jobSearchServerLoadingMore_)return;
+
+  const region=$("jobRegionFilter")?.value||"";
+  const area=$("jobAreaFilter")?.value||"";
+  const company=$("jobCompanyFilter")?.value||"";
+  const career=$("jobCareerFilter")?.value||"";
+  const experience=$("jobBeginnerFilter")?.value||"";
+  const keyword=$("jobKeywordFilter")?.value||"";
+  const payMin=Number($("jobPayMin")?.value||0);
+  const payMax=Number($("jobPayMax")?.value||0);
+  const includeTravel=$("jobTravelFilter")?.checked===true;
+  const remoteMode=$("jobRemoteFilter")?.value||"exclude";
+
+  const requestedPage=
+    append
+      ? Number(jobSearchServerNextPage_||jobSearchServerPage_+1)
+      : 1;
+
+  if(append&&!jobSearchServerHasMore_)return;
+
+  jobSearchServerLoadingMore_=true;
+
+  if(append){
+    const moreBtn=$("jobSearchLoadMoreBtn");
+    if(moreBtn){
+      moreBtn.disabled=true;
+      moreBtn.textContent="読み込み中…";
+    }
+  }else{
+    showWcLoading_("候補案件を抽出中…");
+  }
+
+  try{
+    const response=
+      await apiPost(
+        "searchMatchingJobs",
+        {
+          region,
+          area,
+          company,
+          career,
+          experience,
+          keyword,
+          payMin,
+          payMax,
+          includeTravel,
+          remoteMode,
+          mode:
+            jobSearchMode==="spot"
+              ?"spot"
+              :"long",
+          page:requestedPage,
+          pageSize:WC_JOB_SEARCH_PAGE_SIZE_,
+          resultLimit:WC_JOB_SEARCH_PAGE_SIZE_
+        }
+      );
+
+    const received=
+      Array.isArray(response?.results)
+        ?response.results
+        :Array.isArray(response?.items)
+          ?response.items
+          :[];
+
+    const prepared=
+      received.map(
+        wcPrepareJobSearchItem_
+      );
+
+    if(append){
+      const existingRows=
+        new Set(
+          jobSearchItems.map(
+            x=>String(x.rowNumber||"")
+          )
+        );
+
+      prepared.forEach(item=>{
+        const key=String(item.rowNumber||"");
+        if(!key||!existingRows.has(key)){
+          jobSearchItems.push(item);
+          if(key)existingRows.add(key);
+        }
+      });
+    }else{
+      jobSearchItems=prepared;
+      jobStationSearchApplied=false;
+      jobStationCommuteMap={};
+      jobStationSearchOrigin="";
+      jobStationApiUnavailable=false;
+    }
+
+    jobSearchLoaded=true;
+    jobSearchServerPage_=requestedPage;
+
+    const paging=response?.paging||response?.pagination||{};
+    jobSearchServerHasMore_=
+      response?.hasMore===true||
+      paging?.hasMore===true;
+
+    const rawNext=
+      response?.nextPage ??
+      paging?.nextPage ??
+      null;
+
+    jobSearchServerNextPage_=
+      rawNext!==null&&rawNext!==undefined&&rawNext!==""
+        ?Number(rawNext)
+        :(jobSearchServerHasMore_?requestedPage+1:null);
+
+    /*
+     * 全件データではないので共有案件キャッシュへは書かない。
+     * matching側には現在取得済みの候補だけを渡す。
+     */
+    matchingJobItems=
+      jobSearchItems.slice();
+
+    matchingJobsLoaded=true;
+
+    renderJobSearchResults();
+
+  }catch(error){
+    const box=$("jobSearchResults");
+
+    if(box&&!append){
+      box.innerHTML=
+        `<div class="error">${
+          esc(
+            error?.message||
+            "案件検索に失敗しました。"
+          )
+        }</div>`;
+    }else if(append){
+      showToast(
+        error?.message||
+        "次の案件を読み込めませんでした。",
+        "error"
+      );
+      renderJobSearchResults();
+    }
+
+    return;
+
+  }finally{
+    jobSearchServerLoadingMore_=false;
+    if(!append){
+      await hideWcLoading_(true);
+    }
+  }
+
   const origin=String($("jobOriginStation")?.value||"").trim();
   if(origin&&!resolveOriginStationSelection_())return;
   const selectedOrigin=jobOriginStationSelection;
@@ -3139,11 +3232,25 @@ function wcSafeJobRankingV7437_(x, commute, preferredMinutes, desiredMin, beginn
   /*
    * 距離50 + 単価30 + 経験15 + 基礎5 = 100点
    */
+  const serverPre=
+    Number(
+      x?.serverPreScore||0
+    );
+
+  /*
+   * サーバー一次スコアは候補順の補助。
+   * 最終順位は距離を最重視。
+   */
+  const serverBonus=
+    Number.isFinite(serverPre)
+      ?Math.min(5,Math.max(0,Math.round(serverPre/14)))
+      :0;
+
   const score=Math.max(
     0,
     Math.min(
       100,
-      distance+pay+experience+5
+      distance+pay+experience+5+serverBonus
     )
   );
 
@@ -3350,7 +3457,7 @@ function renderJobSearchResults(){
   const box=$("jobSearchResults");
   if(!items.length){box.innerHTML='<div class="empty job-empty">条件に合う案件がありません。</div>';return;}
 
-  box.innerHTML=items.slice(0,20).map(x=>{
+  box.innerHTML=items.map(x=>{
     const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
@@ -3392,6 +3499,25 @@ function renderJobSearchResults(){
       <details class="job-card-details"><summary>詳細を見る</summary><div class="remarks">${esc(x.originalText||x.remarks||"詳細情報はありません。")}</div></details>
     </article>`;
   }).join("");
+
+  if(jobSearchServerHasMore_){
+    box.insertAdjacentHTML(
+      "beforeend",
+      `<div class="job-search-load-more-wrap" style="display:flex;justify-content:center;padding:20px 0 8px;">
+        <button
+          id="jobSearchLoadMoreBtn"
+          type="button"
+          class="secondary"
+          style="min-width:220px;"
+        >もっと見る</button>
+      </div>`
+    );
+
+    $("jobSearchLoadMoreBtn")?.addEventListener(
+      "click",
+      ()=>runStationAwareJobSearch_({append:true})
+    );
+  }
 }
 
 let jobSearchMode="long";
