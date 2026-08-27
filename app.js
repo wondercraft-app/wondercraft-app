@@ -1,8 +1,9 @@
+/* WC-7.48.2 ランキング内訳直接受渡し版 */
 /* WonderCraft PWA WC-7.45.0 - サーバー側案件検索・根本高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.48.0";
+const WC_PWA_BUILD="WC-7.49.0";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -149,6 +150,22 @@ function wcInjectRuntimeFixStyles_(){
     .interview-time{min-width:148px!important;width:148px!important;flex:0 0 148px!important;}
     .interview-time strong{display:block!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important;font-variant-numeric:tabular-nums!important;line-height:1.05!important;}
     .home-today-row time{white-space:nowrap!important;word-break:keep-all!important;font-variant-numeric:tabular-nums!important;}
+    /* WC-7.49.0: 案件検索「並び替え」の縦折返しを防止 */
+    #jobSort{
+      min-width:240px!important;
+      width:auto!important;
+      flex:0 0 auto!important;
+    }
+    :is(label,div,section):has(> #jobSort),
+    :is(label,div,section):has(#jobSort){
+      align-items:center!important;
+    }
+    :is(label,div,section):has(#jobSort) > :not(#jobSort){
+      white-space:nowrap!important;
+      word-break:keep-all!important;
+      overflow-wrap:normal!important;
+    }
+
   `;
   document.head.appendChild(style);
 }
@@ -224,6 +241,8 @@ window.addEventListener("load",async()=>{
   try{
     registerWonderCraftServiceWorker_();
     wcInjectRuntimeFixStyles_();
+  wcInstallHomeRefreshHooksV7490_();
+  setTimeout(wcFixJobSortLayoutV7490_,100);
     bindEvents();
 
     if($("appVersion")){
@@ -530,6 +549,241 @@ function applyBootstrapData(bootstrap){
   updateUserUi();const filters=bootstrap.filters||{};state.progressStatuses=filters.progressStatuses||[];
   fillSelect("staffFilter",filters.staff||[],"担当者：全員");fillSelect("regionFilter",filters.regions||[],"地域：すべて");
   renderDashboard(bootstrap.dashboard||{});state.today=bootstrap.today||[];$("appPanel").hidden=false;hideSystemPanel();applyViewState();if(state.view==="home")renderToday(state.today);return "internal";
+}
+
+
+/* =========================================================
+ * WC-7.49.0
+ * UI微調整 + ホーム最新情報更新
+ * ========================================================= */
+
+let wcHomeLiveRefreshTimerV7490_=null;
+let wcHomeRefreshRunningV7490_=false;
+let wcHomeLastRefreshV7490_=0;
+
+function wcFixJobSortLayoutV7490_(){
+  const sort=$("jobSort");
+  if(!sort)return;
+
+  sort.style.minWidth="240px";
+  sort.style.width="auto";
+  sort.style.flex="0 0 auto";
+
+  let node=sort.parentElement;
+  for(let depth=0;node&&depth<2;depth++,node=node.parentElement){
+    node.style.alignItems="center";
+
+    Array.from(node.children||[]).forEach(child=>{
+      if(child!==sort){
+        child.style.whiteSpace="nowrap";
+        child.style.wordBreak="keep-all";
+        child.style.overflowWrap="normal";
+      }
+    });
+  }
+}
+
+/*
+ * bootstrap にお知らせ配列が含まれている構成にも対応。
+ * 現在HTMLに該当欄がなければ何もしないので既存画面を壊さない。
+ */
+function wcRenderAnnouncementsV7490_(payload){
+  const items=
+    payload?.announcements ||
+    payload?.notices ||
+    payload?.news ||
+    payload?.updates ||
+    [];
+
+  if(!Array.isArray(items))return;
+
+  const box=
+    $("homeAnnouncements") ||
+    $("announcementList") ||
+    $("announcements") ||
+    $("homeNotices") ||
+    $("noticeList");
+
+  if(!box)return;
+
+  if(!items.length){
+    box.innerHTML='<div class="muted-preview">現在のお知らせはありません。</div>';
+    return;
+  }
+
+  box.innerHTML=items.slice(0,10).map(item=>{
+    const title=
+      item?.title ||
+      item?.subject ||
+      item?.message ||
+      item?.text ||
+      "お知らせ";
+
+    const date=
+      item?.date ||
+      item?.updatedAt ||
+      item?.createdAt ||
+      item?.timestamp ||
+      "";
+
+    const body=
+      item?.body ||
+      item?.description ||
+      "";
+
+    return `
+      <div class="wc-home-notice-item" style="padding:10px 0;border-bottom:1px solid rgba(127,127,127,.15);">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;">
+          <strong>${esc(String(title))}</strong>
+          ${date?`<small>${esc(String(date))}</small>`:""}
+        </div>
+        ${body?`<div style="margin-top:4px;">${esc(String(body))}</div>`:""}
+      </div>`;
+  }).join("");
+}
+
+function wcSetHomeUpdatedAtV7490_(){
+  const candidates=[
+    $("homeLastUpdated"),
+    $("announcementLastUpdated"),
+    $("noticeLastUpdated")
+  ].filter(Boolean);
+
+  const now=new Date();
+  const hh=String(now.getHours()).padStart(2,"0");
+  const mm=String(now.getMinutes()).padStart(2,"0");
+
+  candidates.forEach(el=>{
+    el.textContent=`最終更新 ${hh}:${mm}`;
+  });
+}
+
+async function wcRefreshHomeLiveV7490_(force=false){
+  if(wcHomeRefreshRunningV7490_)return false;
+  if(state.view!=="home" && !force)return false;
+
+  const now=Date.now();
+
+  // 短時間の連打を防止
+  if(!force && now-wcHomeLastRefreshV7490_<30000){
+    return false;
+  }
+
+  wcHomeRefreshRunningV7490_=true;
+
+  try{
+    /*
+     * dashboard / today を個別取得するより bootstrap 1回で同期。
+     * 起動キャッシュではなくGAS最新値を取得する。
+     */
+    const bootstrap=await apiGet("bootstrap");
+
+    if(bootstrap?.dashboard){
+      renderDashboard(bootstrap.dashboard);
+    }
+
+    if(Array.isArray(bootstrap?.today)){
+      state.today=bootstrap.today;
+      renderToday(state.today);
+    }
+
+    wcRenderAnnouncementsV7490_(bootstrap);
+
+    /*
+     * bootstrapにお知らせが無い環境では
+     * announcements エンドポイントがあれば追加取得。
+     * 未実装なら静かに無視する。
+     */
+    const hasBootstrapAnnouncements=
+      Array.isArray(bootstrap?.announcements) ||
+      Array.isArray(bootstrap?.notices) ||
+      Array.isArray(bootstrap?.news) ||
+      Array.isArray(bootstrap?.updates);
+
+    if(!hasBootstrapAnnouncements){
+      try{
+        const announcements=await apiGet("announcements");
+        if(Array.isArray(announcements)){
+          wcRenderAnnouncementsV7490_({announcements});
+        }else if(announcements&&typeof announcements==="object"){
+          wcRenderAnnouncementsV7490_(announcements);
+        }
+      }catch(_e){
+        // 未実装APIなら既存画面を維持
+      }
+    }
+
+    writeBootCache({
+      user:bootstrap?.user||state.user||null,
+      config:bootstrap?.config||state.runtimeConfig||{},
+      filters:bootstrap?.filters||{},
+      dashboard:bootstrap?.dashboard||{},
+      today:bootstrap?.today||state.today||[],
+      announcements:
+        bootstrap?.announcements||
+        bootstrap?.notices||
+        bootstrap?.news||
+        bootstrap?.updates||
+        []
+    });
+
+    wcHomeLastRefreshV7490_=Date.now();
+    wcSetHomeUpdatedAtV7490_();
+    return true;
+
+  }catch(error){
+    console.warn("[WC-7.49.0] home live refresh failed",error);
+    return false;
+
+  }finally{
+    wcHomeRefreshRunningV7490_=false;
+  }
+}
+
+function wcStartHomeLiveRefreshV7490_(){
+  if(wcHomeLiveRefreshTimerV7490_){
+    clearInterval(wcHomeLiveRefreshTimerV7490_);
+  }
+
+  // 5分ごとに最新情報へ同期
+  wcHomeLiveRefreshTimerV7490_=setInterval(()=>{
+    if(
+      state.view==="home" &&
+      !document.hidden &&
+      !$("appPanel")?.hidden
+    ){
+      wcRefreshHomeLiveV7490_(false);
+    }
+  },5*60*1000);
+}
+
+function wcInstallHomeRefreshHooksV7490_(){
+  wcStartHomeLiveRefreshV7490_();
+
+  window.addEventListener("focus",()=>{
+    if(state.view==="home"){
+      wcRefreshHomeLiveV7490_(false);
+    }
+  });
+
+  document.addEventListener("visibilitychange",()=>{
+    if(!document.hidden&&state.view==="home"){
+      wcRefreshHomeLiveV7490_(false);
+    }
+  });
+
+  /*
+   * HTML側に更新ボタンがある場合は自動接続。
+   * 無い場合は何もしない。
+   */
+  [
+    "announcementRefreshBtn",
+    "noticeRefreshBtn",
+    "homeRefreshBtn",
+    "refreshHomeBtn"
+  ].forEach(id=>{
+    $(id)?.addEventListener("click",()=>wcRefreshHomeLiveV7490_(true));
+  });
 }
 
 async function initialize(force=false){
@@ -946,10 +1200,12 @@ async function loadCurrent(){
   if(state.view==="home"){
     showWcLoading_("読み込み中…");
     try{
-      const items=await apiGet("today");
-      if(requestId!==loadRequestId) return;
-      state.today=items;
-      renderToday(items);
+      /*
+       * WC-7.49.0:
+       * 本日の面談だけでなく、件数・お知らせもまとめて最新化。
+       */
+      await wcRefreshHomeLiveV7490_(true);
+      if(requestId!==loadRequestId)return;
     }finally{
       await hideWcLoading_();
     }
@@ -3208,117 +3464,70 @@ function testStructuredExperienceSearchV7433_(){
  */
 function wcSafeJobDistanceScoreV7437_(minutes, preferredMinutes){
   const m=Number(minutes);
-  const preferred=Math.max(15,Number(preferredMinutes||60));
+  if(!Number.isFinite(m)||m<=0)return 0;
+  if(m>120)return -999;
 
-  if(!Number.isFinite(m)||m<=0){
-    return 5;
-  }
-
-  if(m>120){
-    return -999;
-  }
-
-  if(m<=preferred){
-    if(m<=30)return 50;
-    if(m<=45)return 47;
-    return 44;
-  }
-
-  const over=m-preferred;
-
-  if(over<=15)return 36;
-  if(over<=30)return 27;
-  if(m<=90)return 18;
-  if(m<=105)return 9;
-  return 3;
+  // WC-MATCH-2.3.x と同じ通勤35点配点
+  if(m<=30)return 35;
+  if(m<=45)return 32;
+  if(m<=60)return 28;
+  if(m<=75)return 20;
+  if(m<=90)return 12;
+  if(m<=105)return 6;
+  return 2;
 }
-
 
 function wcSafeJobPayScoreV7437_(pay, desiredMin){
   const p=Number(pay||0);
   const desired=Number(desiredMin||0);
 
-  if(!p)return 7;
-  if(!desired)return 30;
+  // 希望単価を指定していない検索では単価条件は満たしている扱い。
+  if(!desired)return 35;
+  if(!p)return 0;
 
   const diff=p-desired;
-
-  if(diff>=5000)return 30;
-  if(diff>=3000)return 29;
-  if(diff>=1000)return 27;
-  if(diff>=0)return 25;
-  if(diff>=-1000)return 22;
-  if(diff>=-3000)return 17;
-  if(diff>=-5000)return 11;
-  if(diff>=-10000)return 5;
+  if(diff>=0)return 35;
+  if(diff>=-1000)return 31;
+  if(diff>=-2000)return 27;
+  if(diff>=-3000)return 23;
+  if(diff>=-4000)return 19;
+  if(diff>=-5000)return 15;
+  if(diff>=-7000)return 8;
   return 2;
 }
 
-
-function wcSafeJobExperienceScoreV7437_(x, filter){
-  const mode=wcExperienceFilterModeV7430_(filter);
-  const cls=normalizeJobText(x?.experienceClass||"");
-
-  if(mode==="beginner"){
-    if(cls==="未経験可")return 15;
-    if(cls==="条件記載なし")return 10;
-    if(cls==="経験者優先")return 6;
-    return 4;
-  }
-
-  if(mode==="experienced"){
-    if(cls==="経験必須")return 15;
-    if(cls==="経験者優先")return 14;
-    if(cls==="未経験可")return 12;
-    if(cls==="条件記載なし")return 9;
-    return 6;
-  }
-
-  return 12;
-}
-
-
 function wcSafeJobRankingV7437_(x, commute, preferredMinutes, desiredMin, beginnerFilter){
-  const distance=wcSafeJobDistanceScoreV7437_(commute,preferredMinutes);
-
-  if(distance<0){
-    return {
-      score:0,
-      excluded:true
-    };
+  const commutePoints=wcSafeJobDistanceScoreV7437_(commute,preferredMinutes);
+  if(commutePoints<0){
+    return {score:0,excluded:true,commutePoints:0,pricePoints:0,jobTypePoints:0,careerPoints:0,startTimingPoints:0};
   }
 
-  const pay=wcSafeJobPayScoreV7437_(x.__wcPay,desiredMin);
-  const experience=wcSafeJobExperienceScoreV7437_(x,beginnerFilter);
+  const pricePoints=wcSafeJobPayScoreV7437_(x.__wcPay,desiredMin);
 
   /*
-   * 距離50 + 単価30 + 経験15 + 基礎5 = 100点
+   * 案件検索画面は「求職者を1名選んで採点」する画面ではないため、
+   * 求職者固有の希望が未指定の項目は検索条件との適合として満点扱いにする。
+   * サーバーから正式な内訳が返っている場合はそちらを優先する。
    */
-  const serverPre=
-    Number(
-      x?.serverPreScore||0
-    );
+  const jobTypePoints=Number.isFinite(Number(x?.jobTypePoints))?Number(x.jobTypePoints):15;
+  const careerPoints=Number.isFinite(Number(x?.careerPoints))?Number(x.careerPoints):10;
+  const startTimingPoints=Number.isFinite(Number(x?.startTimingPoints))?Number(x.startTimingPoints):5;
 
-  /*
-   * サーバー一次スコアは候補順の補助。
-   * 最終順位は距離を最重視。
-   */
-  const serverBonus=
-    Number.isFinite(serverPre)
-      ?Math.min(5,Math.max(0,Math.round(serverPre/14)))
-      :0;
-
-  const score=Math.max(
-    0,
-    Math.min(
-      100,
-      distance+pay+experience+5+serverBonus
-    )
-  );
+  const score=Math.max(0,Math.min(100,
+    commutePoints+pricePoints+jobTypePoints+careerPoints+startTimingPoints
+  ));
 
   return {
     score,
-    excluded:false
+    percent:score,
+    excluded:false,
+    commutePoints,
+    pricePoints,
+    jobTypePoints,
+    careerPoints,
+    startTimingPoints,
+    commuteMinutes:Number.isFinite(Number(commute))?Number(commute):null,
+    jobBusinessTypeLabel:x?.jobBusinessTypeLabel||""
   };
 }
 
@@ -3342,22 +3551,59 @@ function wcRankingLabel_(score){
   return "優先度低め";
 }
 
-function wcRankingBreakdownHtml_(job){
-  const score=wcRankingNum_(job.percent ?? job.score ?? job.matchScore);
-  const commute=wcRankingNum_(job.commutePoints);
-  const price=wcRankingNum_(job.pricePoints);
-  const type=wcRankingNum_(job.jobTypePoints);
-  const career=wcRankingNum_(job.careerPoints);
-  const start=wcRankingNum_(job.startTimingPoints);
 
+function wcRankingBreakdownHtmlV7490_(safeRanking){
+  const r=safeRanking||{};
+
+  const score=Number(r.score??r.percent??0)||0;
+  const commute=Number(r.commutePoints??0)||0;
+  const price=Number(r.pricePoints??0)||0;
+  const type=Number(r.jobTypePoints??0)||0;
+  const career=Number(r.careerPoints??0)||0;
+  const start=Number(r.startTimingPoints??0)||0;
+
+  const commuteMinutes=
+    Number.isFinite(Number(r.commuteMinutes))
+      ? Number(r.commuteMinutes)
+      : null;
+
+  return `
+    <div class="wc-ranking-box" style="margin:10px 0 12px;padding:12px;border:1px solid rgba(127,127,127,.22);border-radius:12px;">
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <strong style="font-size:22px;">${score}点</strong>
+        <span style="font-weight:700;">${esc(wcRankingLabel_(score))}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:5px 12px;font-size:13px;">
+        <span>🚃 通勤${commuteMinutes!==null?`（${commuteMinutes}分）`:""}</span><strong>${commute}/35</strong>
+        <span>💰 単価</span><strong>${price}/35</strong>
+        <span>🏬 案件タイプ</span><strong>${type}/15</strong>
+        <span>📱 キャリア</span><strong>${career}/10</strong>
+        <span>📅 開始時期</span><strong>${start}/5</strong>
+      </div>
+    </div>`;
+}
+
+function wcRankingBreakdownHtml_(job, safeRanking){
+  // WC-7.48.2: 検索画面ではクライアント側で確定したランキングを表示する。
+  // 旧実装は raw job の未設定フィールドを読んでいたため全項目0点になっていた。
+  const ranking=safeRanking||job?.__wcSafeRanking||job||{};
+  const score=wcRankingNum_(ranking.score ?? ranking.percent ?? job.percent ?? job.score ?? job.matchScore);
+  const commute=wcRankingNum_(ranking.commutePoints ?? job.commutePoints);
+  const price=wcRankingNum_(ranking.pricePoints ?? job.pricePoints);
+  const type=wcRankingNum_(ranking.jobTypePoints ?? job.jobTypePoints);
+  const career=wcRankingNum_(ranking.careerPoints ?? job.careerPoints);
+  const start=wcRankingNum_(ranking.startTimingPoints ?? job.startTimingPoints);
+
+  const commuteMinutes=ranking.commuteMinutes ?? job.commuteMinutes;
   const commuteDetail=
-    job.commuteMinutes
-      ? `（${esc(String(job.commuteMinutes))}分）`
+    commuteMinutes
+      ? `（${esc(String(commuteMinutes))}分）`
       : "";
 
+  const typeLabel=ranking.jobBusinessTypeLabel||job.jobBusinessTypeLabel||"";
   const typeDetail=
-    job.jobBusinessTypeLabel
-      ? `（${esc(String(job.jobBusinessTypeLabel))}）`
+    typeLabel
+      ? `（${esc(String(typeLabel))}）`
       : "";
 
   return `
@@ -3390,6 +3636,7 @@ function wcSortJobSearchRankingV747_(items){
 }
 
 function renderJobSearchResults(){
+  wcFixJobSortLayoutV7490_();
   /* WC-7.47.0: 取得済み候補を総合点順に表示 */
   if(Array.isArray(jobSearchItems)&&jobSearchItems.length){
     jobSearchItems=wcSortJobSearchRankingV747_(jobSearchItems);
@@ -3629,7 +3876,7 @@ function renderJobSearchResults(){
     const remote=isRemoteJob_(x);
     const travel=isTravelJob_(x);
     const date=getJobDate_(x);
-    return `<article class="job-result-card">${wcRankingBreakdownHtml_(x)}
+    return `<article class="job-result-card">${wcRankingBreakdownHtmlV7490_(x.__wcSafeRanking)}
       <div class="job-card-main">
         <div class="job-card-title-row">
           <span class="job-kind-badge ${spot?'spot':'long'}">${spot?'スポット':'長期案件'}</span>
