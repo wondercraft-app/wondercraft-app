@@ -2,7 +2,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.46.0";
+const WC_PWA_BUILD="WC-7.47.0";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -3261,7 +3261,77 @@ function wcSafeJobRankingV7437_(x, commute, preferredMinutes, desiredMin, beginn
 }
 
 
+
+/* =========================================================
+ * WC-7.47.0 案件ランキング表示
+ * GAS WC-MATCH-2.3.0 の100点配点をカードへ表示する。
+ * ========================================================= */
+function wcRankingNum_(value){
+  const n=Number(value);
+  return Number.isFinite(n)?n:0;
+}
+
+function wcRankingLabel_(score){
+  const n=wcRankingNum_(score);
+  if(n>=85)return "かなりおすすめ";
+  if(n>=70)return "おすすめ";
+  if(n>=55)return "候補";
+  if(n>=40)return "条件確認";
+  return "優先度低め";
+}
+
+function wcRankingBreakdownHtml_(job){
+  const score=wcRankingNum_(job.percent ?? job.score ?? job.matchScore);
+  const commute=wcRankingNum_(job.commutePoints);
+  const price=wcRankingNum_(job.pricePoints);
+  const type=wcRankingNum_(job.jobTypePoints);
+  const career=wcRankingNum_(job.careerPoints);
+  const start=wcRankingNum_(job.startTimingPoints);
+
+  const commuteDetail=
+    job.commuteMinutes
+      ? `（${esc(String(job.commuteMinutes))}分）`
+      : "";
+
+  const typeDetail=
+    job.jobBusinessTypeLabel
+      ? `（${esc(String(job.jobBusinessTypeLabel))}）`
+      : "";
+
+  return `
+    <div class="wc-ranking-box" style="margin:10px 0 12px;padding:12px;border:1px solid rgba(127,127,127,.22);border-radius:12px;">
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <strong style="font-size:22px;">${score}点</strong>
+        <span style="font-weight:700;">${esc(wcRankingLabel_(score))}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:5px 12px;font-size:13px;">
+        <span>🚃 通勤 ${commuteDetail}</span><strong>${commute}/35</strong>
+        <span>💰 単価</span><strong>${price}/35</strong>
+        <span>🏬 案件タイプ ${typeDetail}</span><strong>${type}/15</strong>
+        <span>📱 キャリア</span><strong>${career}/10</strong>
+        <span>📅 開始時期</span><strong>${start}/5</strong>
+      </div>
+    </div>`;
+}
+
+function wcSortJobSearchRankingV747_(items){
+  return [...items].sort((a,b)=>{
+    const aExcluded=a?.commuteExcluded===true;
+    const bExcluded=b?.commuteExcluded===true;
+    if(aExcluded!==bExcluded)return aExcluded?1:-1;
+
+    return (
+      wcRankingNum_(b.percent ?? b.score ?? b.matchScore)-
+      wcRankingNum_(a.percent ?? a.score ?? a.matchScore)
+    );
+  });
+}
+
 function renderJobSearchResults(){
+  /* WC-7.47.0: 取得済み候補を総合点順に表示 */
+  if(Array.isArray(jobSearchItems)&&jobSearchItems.length){
+    jobSearchItems=wcSortJobSearchRankingV747_(jobSearchItems);
+  }
   if(!jobSearchLoaded)return;
 
   const region=$("jobRegionFilter")?.value||"";
@@ -3468,7 +3538,7 @@ function renderJobSearchResults(){
     const remote=isRemoteJob_(x);
     const travel=isTravelJob_(x);
     const date=getJobDate_(x);
-    return `<article class="job-result-card">
+    return `<article class="job-result-card">${wcRankingBreakdownHtml_(x)}
       <div class="job-card-main">
         <div class="job-card-title-row">
           <span class="job-kind-badge ${spot?'spot':'long'}">${spot?'スポット':'長期案件'}</span>
