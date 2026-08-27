@@ -2,7 +2,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.47.0";
+const WC_PWA_BUILD="WC-7.48.0";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -2314,8 +2314,42 @@ async function runStationAwareJobSearch_(options={}){
 
   if(jobSearchServerLoadingMore_)return;
 
-  const region=$("jobRegionFilter")?.value||"";
-  const area=$("jobAreaFilter")?.value||"";
+  /*
+   * WC-7.48.0
+   * 起点駅が選択されている場合、全国50件を先に取るのではなく
+   * 起点駅の都道府県をサーバー検索へ渡して候補母集団を先に絞る。
+   *
+   * ユーザーがエリア/都道府県を明示指定している場合は
+   * その指定を優先する。
+   */
+  const originInput=
+    String(
+      $("jobOriginStation")?.value||""
+    ).trim();
+
+  if(originInput&&!resolveOriginStationSelection_()){
+    return;
+  }
+
+  const selectedOriginForServer=
+    jobOriginStationSelection;
+
+  const region=
+    $("jobRegionFilter")?.value||"";
+
+  const selectedArea=
+    $("jobAreaFilter")?.value||"";
+
+  const originPrefecture=
+    String(
+      selectedOriginForServer?.prefecture||""
+    ).trim();
+
+  const area=
+    selectedArea||
+    originPrefecture||
+    "";
+
   const company=$("jobCompanyFilter")?.value||"";
   const career=$("jobCareerFilter")?.value||"";
   const experience=$("jobBeginnerFilter")?.value||"";
@@ -2375,6 +2409,29 @@ async function runStationAwareJobSearch_(options={}){
         :Array.isArray(response?.items)
           ?response.items
           :[];
+
+    /*
+     * WC-7.48.0
+     * 起点駅検索の診断情報。UIには表示せずconsoleのみ。
+     */
+    console.log(
+      "[WC_JOB_SEARCH_748]",
+      {
+        origin:
+          selectedOriginForServer
+            ? `${selectedOriginForServer.name}駅（${selectedOriginForServer.prefecture}）`
+            : "",
+        serverArea:area,
+        serverRegion:region,
+        received:received.length,
+        filteredJobs:
+          response?.filteredJobs ?? null,
+        totalJobs:
+          response?.totalJobs ?? null,
+        page:
+          response?.page ?? requestedPage
+      }
+    );
 
     const prepared=
       received.map(
@@ -2462,10 +2519,15 @@ async function runStationAwareJobSearch_(options={}){
     }
   }
 
-  const origin=String($("jobOriginStation")?.value||"").trim();
-  if(origin&&!resolveOriginStationSelection_())return;
-  const selectedOrigin=jobOriginStationSelection;
-  const originDisplay=selectedOrigin?`${selectedOrigin.name}駅（${selectedOrigin.prefecture}）`:origin;
+  const origin=originInput;
+  const selectedOrigin=
+    selectedOriginForServer ||
+    jobOriginStationSelection;
+
+  const originDisplay=
+    selectedOrigin
+      ? `${selectedOrigin.name}駅（${selectedOrigin.prefecture}）`
+      : origin;
   jobStationSearchApplied=false;jobStationCommuteMap={};jobStationSearchOrigin=originDisplay;jobStationApiUnavailable=false;
   renderJobSearchResults();
   if(!origin){updateJobRangeLabels();return;}
@@ -3525,7 +3587,36 @@ function renderJobSearchResults(){
 
   $("jobResultCount").textContent=`${items.length}件`;
   const box=$("jobSearchResults");
-  if(!items.length){box.innerHTML='<div class="empty job-empty">条件に合う案件がありません。</div>';return;}
+  if(!items.length){
+    box.innerHTML=
+      '<div class="empty job-empty">条件に合う案件がありません。</div>';
+
+    /*
+     * WC-7.48.0
+     * 現在ページの候補が通勤条件等で0件でも、
+     * サーバー側に続きがあれば次ページへ進める。
+     */
+    if(jobSearchServerHasMore_){
+      box.insertAdjacentHTML(
+        "beforeend",
+        `<div class="job-search-load-more-wrap" style="display:flex;justify-content:center;padding:20px 0 8px;">
+          <button
+            id="jobSearchLoadMoreBtn"
+            type="button"
+            class="secondary"
+            style="min-width:220px;"
+          >次の候補を探す</button>
+        </div>`
+      );
+
+      $("jobSearchLoadMoreBtn")?.addEventListener(
+        "click",
+        ()=>runStationAwareJobSearch_({append:true})
+      );
+    }
+
+    return;
+  }
 
   box.innerHTML=items.map(x=>{
     const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
