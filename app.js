@@ -3,7 +3,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.49.0";
+const WC_PWA_BUILD="WC-7.49.1";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -2601,9 +2601,26 @@ async function runStationAwareJobSearch_(options={}){
       selectedOriginForServer?.prefecture||""
     ).trim();
 
+  /*
+   * WC-7.49.1
+   * 起点駅の「都道府県」でサーバー候補を固定すると、
+   * 北大路駅（京都府）→大阪府など、実際には通勤圏内の隣接府県案件が
+   * サーバー検索の時点で消えてしまう。
+   *
+   * ユーザーが都道府県を明示選択した場合だけ area を固定。
+   * 未選択時は起点駅の地域（関西・関東など）までに留める。
+   */
+  const originRegion=
+    Object.entries(WC_JOB_REGION_MAP).find(
+      ([,prefs])=>Array.isArray(prefs)&&prefs.includes(originPrefecture)
+    )?.[0]||"";
+
+  const serverRegion=
+    region||
+    (!selectedArea?originRegion:"");
+
   const area=
     selectedArea||
-    originPrefecture||
     "";
 
   const company=$("jobCompanyFilter")?.value||"";
@@ -2639,7 +2656,7 @@ async function runStationAwareJobSearch_(options={}){
       await apiPost(
         "searchMatchingJobs",
         {
-          region,
+          region:serverRegion,
           area,
           company,
           career,
@@ -2678,7 +2695,7 @@ async function runStationAwareJobSearch_(options={}){
             ? `${selectedOriginForServer.name}駅（${selectedOriginForServer.prefecture}）`
             : "",
         serverArea:area,
-        serverRegion:region,
+        serverRegion:serverRegion,
         received:received.length,
         filteredJobs:
           response?.filteredJobs ?? null,
@@ -2784,11 +2801,27 @@ async function runStationAwareJobSearch_(options={}){
     selectedOrigin
       ? `${selectedOrigin.name}駅（${selectedOrigin.prefecture}）`
       : origin;
-  jobStationSearchApplied=false;jobStationCommuteMap={};jobStationSearchOrigin=originDisplay;jobStationApiUnavailable=false;
+  if(!append){
+    jobStationSearchApplied=false;
+    jobStationCommuteMap={};
+    jobStationApiUnavailable=false;
+  }else{
+    // WC-7.49.1: 「次の候補」取得時も既に測定済みの通勤時間を保持する。
+    jobStationSearchApplied=false;
+  }
+  jobStationSearchOrigin=originDisplay;
   renderJobSearchResults();
   if(!origin){updateJobRangeLabels();return;}
 
-  const candidates=(jobSearchCurrentItems||[]).filter(job=>Number(job.rowNumber)>0).slice(0,24);
+  const candidates=(jobSearchCurrentItems||[])
+    .filter(job=>
+      Number(job.rowNumber)>0 &&
+      !Object.prototype.hasOwnProperty.call(
+        jobStationCommuteMap,
+        String(job.rowNumber)
+      )
+    )
+    .slice(0,24);
   if(!candidates.length)return;
   const batchSize=4,batches=[];
   for(let i=0;i<candidates.length;i+=batchSize)batches.push(candidates.slice(i,i+batchSize));
@@ -2796,7 +2829,9 @@ async function runStationAwareJobSearch_(options={}){
   let successCount=0,failedBatchCount=0,completed=0;
   const concurrency=Math.min(2,batches.length);
   let nextIndex=0;
-  jobStationCommuteMap={};
+  if(!append){
+    jobStationCommuteMap={};
+  }
   showWcLoading_(`${originDisplay}からの通勤時間を確認中…`);
 
   async function worker(){
@@ -2843,7 +2878,30 @@ async function runStationAwareJobSearch_(options={}){
     renderJobSearchResults();
     const box=$("jobSearchResults");
     if(box){const notice=jobStationApiUnavailable?"通勤時間検索を利用するには、最新GASの再デプロイが必要です。":"通勤時間だけ取得できませんでした。その他の条件で検索結果を表示しています。";box.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">${notice}</div>`);}
-  }finally{await hideWcLoading_(true);}
+  }finally{
+    await hideWcLoading_(true);
+  }
+
+  /*
+   * WC-7.49.1
+   * 1ページ目の候補が通勤判定後に0件でも、
+   * サーバー側に次ページがあるならユーザーに毎回
+   * 「次の候補を探す」を押させず、自動で次ページへ進む。
+   * 最大4ページまで自動探索して無限ループを防止する。
+   */
+  const autoDepth=Number(options?.autoDepth||0);
+  if(
+    origin &&
+    jobStationSearchApplied &&
+    (!Array.isArray(jobSearchCurrentItems)||jobSearchCurrentItems.length===0) &&
+    jobSearchServerHasMore_ &&
+    autoDepth<3
+  ){
+    await runStationAwareJobSearch_({
+      append:true,
+      autoDepth:autoDepth+1
+    });
+  }
 }
 
 function getJobCommuteMinutes_(x){
