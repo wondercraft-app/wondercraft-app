@@ -1327,9 +1327,9 @@ function renderToday(items){renderHomeTodayPreview_(items);
 
   $("cards").innerHTML=sorted.map(x=>{
     const time=normalizeInterviewTime(x.interviewTime||x.interviewDate);
-    return `<article class="card interview-card">
-      <div class="interview-time"><strong>${esc(time||"時間未定")}</strong><span>面談</span></div>
-      <div class="interview-body">
+    return `<article class="card interview-card" style="display:grid!important;grid-template-columns:190px minmax(0,1fr)!important;gap:0!important;padding:0!important;overflow:hidden!important">
+      <div class="interview-time" style="grid-column:1!important;min-width:190px!important;width:190px!important"><strong>${esc(time||"時間未定")}</strong><span>面談</span></div>
+      <div class="interview-body" style="grid-column:2!important;min-width:0!important;padding:18px 22px!important">
         <h3>${esc(x.name||"名前未入力")}</h3>
         <span class="badge">${esc(x.status||"進捗未設定")}</span>
         <div class="details interview-details">${rows([
@@ -2909,6 +2909,12 @@ async function runStationAwareJobSearch_(options={}){
   renderJobSearchResults();
   if(!origin){updateJobRangeLabels();return;}
 
+  /*
+   * WC-7.50.4 大量案件向け駅検索
+   * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
+   * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
+   * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
+   */
   const candidates=(jobSearchCurrentItems||[])
     .filter(job=>
       Number(job.rowNumber)>0 &&
@@ -2917,13 +2923,13 @@ async function runStationAwareJobSearch_(options={}){
         String(job.rowNumber)
       )
     )
-    .slice(0,24);
+    .slice(0,12);
   if(!candidates.length)return;
-  const batchSize=4,batches=[];
+  const batchSize=3,batches=[];
   for(let i=0;i<candidates.length;i+=batchSize)batches.push(candidates.slice(i,i+batchSize));
 
   let successCount=0,failedBatchCount=0,completed=0;
-  const concurrency=Math.min(2,batches.length);
+  const concurrency=1;
   let nextIndex=0;
   if(!append){
     jobStationCommuteMap={};
@@ -2943,7 +2949,8 @@ async function runStationAwareJobSearch_(options={}){
           jobs:batch.map(job=>({
             rowNumber:Number(job.rowNumber),shopName:job.shopName||"",prefecture:job.prefecture||"",area:job.area||"",
             sourceCompany:job.sourceCompany||"",price:job.price||"",originalText:job.originalText||"",
-            storeAddress:job.storeAddress||"",storeLat:job.storeLat||"",storeLng:job.storeLng||""
+            storeAddress:job.storeAddress||"",storeLat:job.storeLat||"",storeLng:job.storeLng||"",
+            nearestStation:job.nearestStation||job.station||job.storeStation||""
           }))
         });
         const rows=Array.isArray(result?.results)?result.results:[];
