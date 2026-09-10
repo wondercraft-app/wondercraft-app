@@ -2910,7 +2910,7 @@ async function runStationAwareJobSearch_(options={}){
   if(!origin){updateJobRangeLabels();return;}
 
   /*
-   * WC-7.50.4 大量案件向け駅検索
+   * WC-7.50.5 大量案件向け駅検索
    * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
@@ -2973,8 +2973,27 @@ async function runStationAwareJobSearch_(options={}){
     await Promise.all(Array.from({length:concurrency},()=>worker()));
     jobStationSearchApplied=true;renderJobSearchResults();
     const box=$("jobSearchResults");
-    if(failedBatchCount>0)box?.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">通勤時間内の案件と、起点駅と同一都道府県の「最寄り駅から選定」案件を表示しています。</div>`);
-    else if(successCount===0)box?.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">通勤時間を取得できませんでした。起点駅と同一都道府県の「最寄り駅から選定」案件のみ表示しています。</div>`);
+    if(successCount===0){
+      const fallbackCount=(jobSearchCurrentItems||[]).filter(job=>
+        wcCommuteFallbackCandidateV7505_(
+          jobStationCommuteMap[String(job.rowNumber)]||null,
+          Number($("jobDistanceRange")?.value||60)
+        )
+      ).length;
+
+      if(fallbackCount===0){
+        // 通勤APIが全面的に失敗した場合、318件などの検索候補を0件表示にしない。
+        // 通勤時間は「未確認」として候補を残し、業務を止めない。
+        jobStationSearchApplied=false;
+        renderJobSearchResults();
+      }
+
+      box?.insertAdjacentHTML("afterbegin",
+        `<div class="job-search-notice compact">通勤時間APIから実測値を取得できなかったため、${fallbackCount>0?"駅マスタ・直線距離で近い案件を「通勤要確認」として候補表示しています。":"その他の検索条件に合う案件を「通勤要確認」として表示しています。"} 60分以内の確定結果ではありません。</div>`
+      );
+    }else if(failedBatchCount>0){
+      box?.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">実測できた通勤時間を優先し、未取得分は駅マスタ・距離情報から候補を補完しています。</div>`);
+    }
   }catch(error){
     jobStationSearchApplied=false;
     const message=String(error?.message||"");jobStationApiUnavailable=/未対応のAPI action|stationJobCommutes/i.test(message);
@@ -3005,6 +3024,24 @@ async function runStationAwareJobSearch_(options={}){
       autoDepth:autoDepth+1
     });
   }
+}
+
+function wcCommuteFallbackCandidateV7505_(routeInfo,maxMinutes){
+  if(!routeInfo)return false;
+  const km=Number(
+    routeInfo.straightKm ??
+    (Number(routeInfo.distanceMeters)>0 ? Number(routeInfo.distanceMeters)/1000 : NaN)
+  );
+  if(!Number.isFinite(km)||km<0)return false;
+
+  /*
+   * NAVITIME取得失敗時の安全側候補。
+   * これは「60分以内確定」ではなく、直線距離から見て通勤候補として
+   * 残すためのフォールバック。カード上では要確認表示にする。
+   */
+  const requested=Number(maxMinutes||60);
+  const limitKm=requested<=30?18:requested<=45?28:requested<=60?40:requested<=90?60:80;
+  return km<=limitKm;
 }
 
 function getJobCommuteMinutes_(x){
@@ -3931,9 +3968,12 @@ function renderJobSearchResults(){
                 commute!==null
                   ? commute<=120
                   : (
-                      samePrefecture &&
-                      areaCompatible &&
-                      (isUndecidedLocationJob || !!textCandidateReason)
+                      wcCommuteFallbackCandidateV7505_(routeInfo,maxMinutes) ||
+                      (
+                        samePrefecture &&
+                        areaCompatible &&
+                        (isUndecidedLocationJob || !!textCandidateReason)
+                      )
                     )
               )
         );
@@ -4079,6 +4119,9 @@ function renderJobSearchResults(){
 
   box.innerHTML=items.map(x=>{
     const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+    const commuteFallbackBadge=originStation&&routeInfo&&!getValidJobCommuteMinutes_(routeInfo)
+      ? `<span class="tag">🚃 通勤要確認</span>`
+      : "";
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
