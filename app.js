@@ -2751,9 +2751,10 @@ async function runStationAwareJobSearch_(options={}){
             jobSearchMode==="spot"
               ?"spot"
               :"long",
+          fastSearch:true,
           page:requestedPage,
-          pageSize:WC_JOB_SEARCH_PAGE_SIZE_,
-          resultLimit:WC_JOB_SEARCH_PAGE_SIZE_
+          pageSize:selectedOriginForServer?30:WC_JOB_SEARCH_PAGE_SIZE_,
+          resultLimit:selectedOriginForServer?30:WC_JOB_SEARCH_PAGE_SIZE_
         }
       );
 
@@ -2910,7 +2911,7 @@ async function runStationAwareJobSearch_(options={}){
   if(!origin){updateJobRangeLabels();return;}
 
   /*
-   * WC-7.50.5 大量案件向け駅検索
+   * WC-7.50.6 大量案件向け駅検索
    * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
@@ -2923,9 +2924,9 @@ async function runStationAwareJobSearch_(options={}){
         String(job.rowNumber)
       )
     )
-    .slice(0,12);
+    .slice(0,8);
   if(!candidates.length)return;
-  const batchSize=3,batches=[];
+  const batchSize=2,batches=[];
   for(let i=0;i<candidates.length;i+=batchSize)batches.push(candidates.slice(i,i+batchSize));
 
   let successCount=0,failedBatchCount=0,completed=0;
@@ -2999,7 +3000,7 @@ async function runStationAwareJobSearch_(options={}){
     const message=String(error?.message||"");jobStationApiUnavailable=/未対応のAPI action|stationJobCommutes/i.test(message);
     renderJobSearchResults();
     const box=$("jobSearchResults");
-    if(box){const notice=jobStationApiUnavailable?"通勤時間検索を利用するには、最新GASの再デプロイが必要です。":"通勤時間だけ取得できませんでした。その他の条件で検索結果を表示しています。";box.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">${notice}</div>`);}
+    if(box){const notice=jobStationApiUnavailable?"通勤時間検索を利用するには、最新GASの再デプロイが必要です。":"通勤時間の実測だけ取得できませんでした。案件候補は「通勤要確認」として表示しています。";box.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">${notice}</div>`);}
   }finally{
     await hideWcLoading_(true);
   }
