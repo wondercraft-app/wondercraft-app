@@ -1751,7 +1751,7 @@ async function requestCandidateSkillSheet(index){
 function renderMySkillRequests(items){
   const box=$("mySkillRequestsList"); if(!box)return;
   if(!Array.isArray(items)||!items.length){box.innerHTML='<div class="empty">申請履歴はありません。</div>';return;}
-  box.innerHTML=items.map(x=>{
+  box.innerHTML=historyNotice+items.map(x=>{
     const open=x.status==="承認済み"&&x.skillSheetUrl
       ? `<button class="primary" onclick="openApprovedSkillSheet('${esc(x.requestId)}','${esc(x.skillSheetUrl)}')">スキルシートを見る</button>`:"";
     return `<article class="card">
@@ -1971,6 +1971,7 @@ let jobSearchServerPage_=1;
 let jobSearchServerHasMore_=false;
 let jobSearchServerNextPage_=null;
 let jobSearchServerLoadingMore_=false;
+let jobSearchHistoricalFallback_=false;
 const WC_JOB_SEARCH_PAGE_SIZE_=50;
 function normalizeJobText(v){return String(v||"").normalize("NFKC").toLowerCase();}
 function extractJobDailyPay(v){
@@ -2031,6 +2032,7 @@ async function loadJobSearchOnce(){
   jobSearchServerHasMore_=false;
   jobSearchServerNextPage_=null;
   jobSearchServerLoadingMore_=false;
+  jobSearchHistoricalFallback_=false;
 
   updateJobRangeLabels();
 
@@ -2530,7 +2532,7 @@ function updateJobRangeLabels(){
     :`${lo.toLocaleString()}円 ～ ${hi.toLocaleString()}円`;
 }
 function resetJobSearch(){
-  ["jobRegionFilter","jobCompanyFilter","jobCareerFilter","jobBeginnerFilter"].forEach(id=>{
+  ["jobRegionFilter","jobCompanyFilter","jobCareerFilter","jobBeginnerFilter","jobCategoryFilter"].forEach(id=>{
     if($(id))$(id).value="";
   });
 
@@ -2554,11 +2556,28 @@ function resetJobSearch(){
   if($("jobSpotDateFrom"))$("jobSpotDateFrom").value="";
   if($("jobSpotDateTo"))$("jobSpotDateTo").value="";
   setJobSearchMode_("long");
+  updateJobCategoryUiV7500_();
+  jobSearchHistoricalFallback_=false;
 
   updateJobPrefectureOptions();
   updateJobRangeLabels();
   renderJobSearchResults();
 }
+
+function updateJobCategoryUiV7500_(){
+  const category=String($("jobCategoryFilter")?.value||"");
+  const telecomOnly=category===""||category==="communication";
+  document.querySelectorAll(".telecom-only-filter").forEach(el=>{
+    el.hidden=!telecomOnly;
+  });
+  if(!telecomOnly){
+    if($("jobCareerFilter"))$("jobCareerFilter").value="";
+    if($("jobBeginnerFilter"))$("jobBeginnerFilter").value="";
+  }
+}
+$("jobCategoryFilter")?.addEventListener("change",updateJobCategoryUiV7500_);
+updateJobCategoryUiV7500_();
+
 async function runStationAwareJobSearch_(options={}){
   /*
    * WC-7.46.0
@@ -2624,8 +2643,10 @@ async function runStationAwareJobSearch_(options={}){
     "";
 
   const company=$("jobCompanyFilter")?.value||"";
-  const career=$("jobCareerFilter")?.value||"";
-  const experience=$("jobBeginnerFilter")?.value||"";
+  const jobCategory=$("jobCategoryFilter")?.value||"";
+  const telecomConditionsEnabled=!jobCategory||jobCategory==="communication";
+  const career=telecomConditionsEnabled?($("jobCareerFilter")?.value||""):"";
+  const experience=telecomConditionsEnabled?($("jobBeginnerFilter")?.value||""):"";
   const keyword=$("jobKeywordFilter")?.value||"";
   const payMin=Number($("jobPayMin")?.value||0);
   const payMax=Number($("jobPayMax")?.value||0);
@@ -2659,6 +2680,7 @@ async function runStationAwareJobSearch_(options={}){
           region:serverRegion,
           area,
           company,
+          jobCategory,
           career,
           experience,
           keyword,
@@ -2735,6 +2757,7 @@ async function runStationAwareJobSearch_(options={}){
     }
 
     jobSearchLoaded=true;
+    jobSearchHistoricalFallback_=response?.historicalFallback===true;
     jobSearchServerPage_=requestedPage;
 
     const paging=response?.paging||response?.pagination||{};
@@ -3892,9 +3915,12 @@ function renderJobSearchResults(){
 
   $("jobResultCount").textContent=`${items.length}件`;
   const box=$("jobSearchResults");
+  const historyNotice=jobSearchHistoricalFallback_
+    ? '<div class="job-history-notice">現在募集中の該当案件はありませんでした。以下は「期限切れ案件」から見つかった過去案件です。現在の募集状況は要確認です。</div>'
+    : "";
   if(!items.length){
     box.innerHTML=
-      '<div class="empty job-empty">条件に合う案件がありません。</div>';
+      historyNotice+'<div class="empty job-empty">条件に合う案件がありません。</div>';
 
     /*
      * WC-7.48.0
