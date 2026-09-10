@@ -1751,7 +1751,7 @@ async function requestCandidateSkillSheet(index){
 function renderMySkillRequests(items){
   const box=$("mySkillRequestsList"); if(!box)return;
   if(!Array.isArray(items)||!items.length){box.innerHTML='<div class="empty">申請履歴はありません。</div>';return;}
-  box.innerHTML=historyNotice+items.map(x=>{
+  box.innerHTML=historyNotice+diagnosticHtml+items.map(x=>{
     const open=x.status==="承認済み"&&x.skillSheetUrl
       ? `<button class="primary" onclick="openApprovedSkillSheet('${esc(x.requestId)}','${esc(x.skillSheetUrl)}')">スキルシートを見る</button>`:"";
     return `<article class="card">
@@ -1972,6 +1972,14 @@ let jobSearchServerHasMore_=false;
 let jobSearchServerNextPage_=null;
 let jobSearchServerLoadingMore_=false;
 let jobSearchHistoricalFallback_=false;
+let jobSearchServerStats_={
+  rawSheetJobs:null,
+  totalJobs:null,
+  filteredJobs:null,
+  returnedJobs:null,
+  counters:null,
+  sourceLabel:"募集中"
+};
 const WC_JOB_SEARCH_PAGE_SIZE_=50;
 function normalizeJobText(v){return String(v||"").normalize("NFKC").toLowerCase();}
 function extractJobDailyPay(v){
@@ -2033,6 +2041,10 @@ async function loadJobSearchOnce(){
   jobSearchServerNextPage_=null;
   jobSearchServerLoadingMore_=false;
   jobSearchHistoricalFallback_=false;
+  jobSearchServerStats_={
+    rawSheetJobs:null,totalJobs:null,filteredJobs:null,returnedJobs:null,
+    counters:null,sourceLabel:"募集中"
+  };
 
   updateJobRangeLabels();
 
@@ -2758,6 +2770,20 @@ async function runStationAwareJobSearch_(options={}){
 
     jobSearchLoaded=true;
     jobSearchHistoricalFallback_=response?.historicalFallback===true;
+    jobSearchServerStats_={
+      rawSheetJobs:
+        response?.rawSheetJobs ?? jobSearchServerStats_.rawSheetJobs,
+      totalJobs:
+        response?.totalJobs ?? jobSearchServerStats_.totalJobs,
+      filteredJobs:
+        response?.filteredJobs ?? jobSearchServerStats_.filteredJobs,
+      returnedJobs:
+        response?.returnedJobs ?? received.length,
+      counters:
+        response?.counters ?? jobSearchServerStats_.counters,
+      sourceLabel:
+        response?.sourceLabel || (response?.historicalFallback===true?"過去案件":"募集中")
+    };
     jobSearchServerPage_=requestedPage;
 
     const paging=response?.paging||response?.pagination||{};
@@ -3716,6 +3742,48 @@ function wcSortJobSearchRankingV747_(items){
   });
 }
 
+
+function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
+  const s=jobSearchServerStats_||{};
+  const raw=Number(s.rawSheetJobs);
+  const active=Number(s.totalJobs);
+  const matched=Number(s.filteredJobs);
+  const c=s.counters||{};
+  const valid=n=>Number.isFinite(n)&&n>=0;
+
+  if(!valid(raw)&&!valid(active)&&!valid(matched))return "";
+
+  const parts=[];
+  if(valid(raw))parts.push(`案件管理 ${raw.toLocaleString("ja-JP")}件`);
+  if(valid(active))parts.push(`検索対象 ${active.toLocaleString("ja-JP")}件`);
+  if(valid(matched))parts.push(`条件一致 ${matched.toLocaleString("ja-JP")}件`);
+  parts.push(`現在表示 ${Number(visibleCount||0).toLocaleString("ja-JP")}件`);
+
+  const excluded=[];
+  const labels=[
+    ["modeExcluded","長期/スポット"],
+    ["remoteExcluded","リモート"],
+    ["travelExcluded","出張"],
+    ["regionExcluded","エリア"],
+    ["areaExcluded","都道府県"],
+    ["companyExcluded","提案元"],
+    ["categoryExcluded","職種"],
+    ["careerExcluded","キャリア"],
+    ["experienceExcluded","経験"],
+    ["keywordExcluded","キーワード"]
+  ];
+  labels.forEach(([key,label])=>{
+    const n=Number(c[key]||0);
+    if(n>0)excluded.push(`${label} ${n.toLocaleString("ja-JP")}件除外`);
+  });
+
+  return `<div class="job-search-diagnostic">
+    <strong>${parts.join(" → ")}</strong>
+    ${excluded.length?`<small>絞り込み内訳：${excluded.join(" / ")}</small>`:""}
+    ${jobSearchServerHasMore_?'<small>※検索結果は50件ずつ読み込みます。「もっと見る」で続きも確認できます。</small>':""}
+  </div>`;
+}
+
 function renderJobSearchResults(){
   wcFixJobSortLayoutV7490_();
   /* WC-7.47.0: 取得済み候補を総合点順に表示 */
@@ -3913,14 +3981,20 @@ function renderJobSearchResults(){
     );
   }
 
-  $("jobResultCount").textContent=`${items.length}件`;
+  const serverMatched=Number(jobSearchServerStats_?.filteredJobs);
+  const totalCount=
+    Number.isFinite(serverMatched)&&serverMatched>=0
+      ?serverMatched
+      :items.length;
+  $("jobResultCount").textContent=`${totalCount.toLocaleString("ja-JP")}件`;
   const box=$("jobSearchResults");
+  const diagnosticHtml=wcJobSearchDiagnosticHtmlV7501_(items.length);
   const historyNotice=jobSearchHistoricalFallback_
     ? '<div class="job-history-notice">現在募集中の該当案件はありませんでした。以下は「期限切れ案件」から見つかった過去案件です。現在の募集状況は要確認です。</div>'
     : "";
   if(!items.length){
     box.innerHTML=
-      historyNotice+'<div class="empty job-empty">条件に合う案件がありません。</div>';
+      historyNotice+diagnosticHtml+'<div class="empty job-empty">条件に合う案件がありません。</div>';
 
     /*
      * WC-7.48.0
