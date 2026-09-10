@@ -2020,7 +2020,7 @@ let jobSearchServerNextPage_=null;
 let jobSearchServerLoadingMore_=false;
 let jobSearchHistoricalFallback_=false;
 /*
- * WC-7.50.8
+ * WC-7.50.9
  * searchMatchingJobs の返却結果はサーバー側で検索条件を通過済み。
  * クライアント側で同じ条件を再判定すると、表記揺れで0件化するため
  * サーバー結果を正として扱う。
@@ -2031,6 +2031,10 @@ let jobSearchServerStats_={
   totalJobs:null,
   filteredJobs:null,
   returnedJobs:null,
+  filteredJobsExact:true,
+  filteredJobsLowerBound:null,
+  scannedRows:null,
+  chunkedSearch:false,
   counters:null,
   sourceLabel:"募集中"
 };
@@ -2098,6 +2102,7 @@ async function loadJobSearchOnce(){
   jobSearchServerAuthoritative_=false;
   jobSearchServerStats_={
     rawSheetJobs:null,totalJobs:null,filteredJobs:null,returnedJobs:null,
+    filteredJobsExact:true,filteredJobsLowerBound:null,scannedRows:null,chunkedSearch:false,
     counters:null,sourceLabel:"募集中"
   };
 
@@ -2761,9 +2766,10 @@ async function runStationAwareJobSearch_(options={}){
               ?"spot"
               :"long",
           fastSearch:true,
+          chunkedSearch:true,
           page:requestedPage,
-          pageSize:selectedOriginForServer?30:WC_JOB_SEARCH_PAGE_SIZE_,
-          resultLimit:selectedOriginForServer?30:WC_JOB_SEARCH_PAGE_SIZE_
+          pageSize:selectedOriginForServer?30:40,
+          resultLimit:selectedOriginForServer?30:40
         }
       );
 
@@ -2837,6 +2843,14 @@ async function runStationAwareJobSearch_(options={}){
         response?.filteredJobs ?? jobSearchServerStats_.filteredJobs,
       returnedJobs:
         response?.returnedJobs ?? received.length,
+      filteredJobsExact:
+        response?.filteredJobsExact !== false,
+      filteredJobsLowerBound:
+        response?.filteredJobsLowerBound ?? null,
+      scannedRows:
+        response?.scannedRows ?? null,
+      chunkedSearch:
+        response?.chunkedSearch === true,
       counters:
         response?.counters ?? jobSearchServerStats_.counters,
       sourceLabel:
@@ -2921,7 +2935,7 @@ async function runStationAwareJobSearch_(options={}){
   if(!origin){updateJobRangeLabels();return;}
 
   /*
-   * WC-7.50.8 大量案件向け駅検索
+   * WC-7.50.9 大量案件向け駅検索
    * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
@@ -3865,7 +3879,14 @@ function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
   const parts=[];
   if(valid(raw))parts.push(`案件管理 ${raw.toLocaleString("ja-JP")}件`);
   if(valid(active))parts.push(`検索対象 ${active.toLocaleString("ja-JP")}件`);
-  if(valid(matched))parts.push(`条件一致 ${matched.toLocaleString("ja-JP")}件`);
+  if(valid(matched)){
+    parts.push(
+      `条件一致 ${matched.toLocaleString("ja-JP")}${s.filteredJobsExact===false?"件以上":"件"}`
+    );
+  }
+  if(Number.isFinite(Number(s.scannedRows))&&Number(s.scannedRows)>0){
+    parts.push(`今回走査 ${Number(s.scannedRows).toLocaleString("ja-JP")}行`);
+  }
   parts.push(`現在表示 ${Number(visibleCount||0).toLocaleString("ja-JP")}件`);
   if(jobSearchServerAuthoritative_&&valid(matched)&&visibleCount<matched){
     parts.push(`読み込み済み ${Number(jobSearchItems?.length||0).toLocaleString("ja-JP")}件`);
@@ -3896,7 +3917,7 @@ function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
   return `<div class="job-search-diagnostic">
     <strong>${parts.join(" → ")}</strong>
     ${excluded.length?`<small>絞り込み内訳：${excluded.join(" / ")}</small>`:""}
-    ${jobSearchServerHasMore_?'<small>※検索結果は50件ずつ読み込みます。「もっと見る」で続きも確認できます。</small>':""}
+    ${jobSearchServerHasMore_?'<small>※検索結果は分割して読み込みます。「次の30件も確認する」で続きも確認できます。</small>':""}
   </div>`;
 }
 
@@ -3975,7 +3996,7 @@ function renderJobSearchResults(){
       isUndecidedLocationJob &&
       !samePrefecture;
 
-    // WC-7.50.8: 未実測案件はここで落とさず、通勤要確認として残す。
+    // WC-7.50.9: 未実測案件はここで落とさず、通勤要確認として残す。
 
     /*
      * WC-7.43.7
@@ -3983,7 +4004,7 @@ function renderJobSearchResults(){
      * 120分超だけハード除外。
      */
     /*
-     * WC-7.50.8 段階式通勤判定
+     * WC-7.50.9 段階式通勤判定
      * 未実測・取得失敗の案件は「通勤要確認」で残す。
      * 実測できて120分を超えた案件だけ除外する。
      */
@@ -4002,7 +4023,7 @@ function renderJobSearchResults(){
     const payOk=true;
 
     /*
-     * WC-7.50.8
+     * WC-7.50.9
      * searchMatchingJobs から返った案件は、職種・エリア・リモート・出張・
      * キャリア・経験・キーワード等をサーバー側ですでに判定済み。
      *
@@ -4114,7 +4135,8 @@ function renderJobSearchResults(){
     Number.isFinite(serverMatched)&&serverMatched>=0
       ?serverMatched
       :items.length;
-  $("jobResultCount").textContent=`${totalCount.toLocaleString("ja-JP")}件`;
+  const countSuffix=jobSearchServerStats_?.filteredJobsExact===false?"件以上":"件";
+  $("jobResultCount").textContent=`${totalCount.toLocaleString("ja-JP")}${countSuffix}`;
   const box=$("jobSearchResults");
   const diagnosticHtml=wcJobSearchDiagnosticHtmlV7501_(items.length);
   const historyNotice=jobSearchHistoricalFallback_
