@@ -1096,9 +1096,46 @@ async function apiGet(action,params={},api=getApi(),token=getToken()){
 }
 
 async function apiPost(action,payload){
-  const response=await wcFetchWithTimeout_(getApi(),{method:"POST",redirect:"follow",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({wc_api:true,action,token:getToken(),payload})});
-  const json=await response.json();
-  if(!json.success){const error=new Error(json.error||"APIエラー");error.code=json.code||"API_ERROR";throw error}
+  const response=await wcFetchWithTimeout_(
+    getApi(),
+    {
+      method:"POST",
+      redirect:"follow",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body:JSON.stringify({wc_api:true,action,token:getToken(),payload})
+    }
+  );
+
+  const raw=await response.text();
+  let json=null;
+
+  try{
+    json=JSON.parse(raw);
+  }catch(parseError){
+    const looksHtml=/^\s*</.test(raw||"");
+    const error=new Error(
+      looksHtml
+        ?"サーバー処理が途中で終了しました。もう一度検索してください。続く場合はGAS実行ログを確認します。"
+        :"サーバーから正しい形式の応答を受け取れませんでした。"
+    );
+    error.code="API_INVALID_RESPONSE";
+    error.httpStatus=response.status;
+    error.responsePreview=String(raw||"").slice(0,300);
+    throw error;
+  }
+
+  if(!response.ok){
+    const error=new Error(json?.error||`API通信エラー (${response.status})`);
+    error.code=json?.code||"API_HTTP_ERROR";
+    throw error;
+  }
+
+  if(!json.success){
+    const error=new Error(json.error||"APIエラー");
+    error.code=json.code||"API_ERROR";
+    throw error;
+  }
+
   return json.data;
 }
 
