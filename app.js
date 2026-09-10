@@ -2020,7 +2020,7 @@ let jobSearchServerNextPage_=null;
 let jobSearchServerLoadingMore_=false;
 let jobSearchHistoricalFallback_=false;
 /*
- * WC-7.50.9
+ * WC-7.51.0
  * searchMatchingJobs の返却結果はサーバー側で検索条件を通過済み。
  * クライアント側で同じ条件を再判定すると、表記揺れで0件化するため
  * サーバー結果を正として扱う。
@@ -2935,7 +2935,7 @@ async function runStationAwareJobSearch_(options={}){
   if(!origin){updateJobRangeLabels();return;}
 
   /*
-   * WC-7.50.9 大量案件向け駅検索
+   * WC-7.51.0 大量案件向け駅検索
    * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
@@ -3921,6 +3921,102 @@ function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
   </div>`;
 }
 
+
+/*****************************************************************
+ * WC-7.51.0 スポット専用表示
+ *****************************************************************/
+function wcSpotPriceDisplayV7510_(value){
+  const raw=String(value||"").trim();
+  if(!raw)return "単価要確認";
+
+  // "/" 区切りで同一価格が大量連結されているケースを重複除去
+  const parts=raw
+    .split(/\s*\/\s*/)
+    .map(v=>String(v||"").trim())
+    .filter(Boolean);
+
+  const unique=[];
+  const seen=new Set();
+  for(const part of parts){
+    const key=part
+      .normalize("NFKC")
+      .replace(/\s+/g,"")
+      .replace(/[〜～]/g,"~")
+      .toLowerCase();
+    if(!seen.has(key)){
+      seen.add(key);
+      unique.push(part);
+    }
+  }
+
+  // ほぼ同一の価格レンジが別表記で混在する場合、最初の代表値を優先
+  if(unique.length>3){
+    const moneyLike=unique.filter(v=>/\d[\d,]*(?:円)?/.test(v));
+    if(moneyLike.length)return moneyLike[0];
+  }
+
+  return unique.join(" / ")||raw;
+}
+
+function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
+  const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+  const commute=originStation
+    ? getValidJobCommuteMinutes_(routeInfo)
+    : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
+
+  const date=getJobDate_(x);
+  const remote=isRemoteJob_(x);
+  const travel=isTravelJob_(x);
+  const price=wcSpotPriceDisplayV7510_(x.price);
+
+  const commuteHtml=commute!==null
+    ? `<span class="${commute<=maxMinutes?'job-commute-ok':'job-commute-over'}">🚃 約${commute}分${commute<=maxMinutes?'':'（希望時間超）'}</span>`
+    : (originStation
+        ? `<span class="job-commute-pending">🚃 通勤要確認</span>`
+        : "");
+
+  return `<article class="job-result-card spot-job-result-card">
+    <div class="job-card-main spot-job-card-main">
+      <div class="job-card-title-row">
+        <span class="job-kind-badge spot">スポット</span>
+        <h3>${esc(getJobDisplayName_(x))}</h3>
+      </div>
+
+      <div class="spot-job-info-grid">
+        <div class="spot-job-info-item">
+          <span class="spot-job-label">勤務地</span>
+          <strong>📍 ${esc(x.prefecture||x.area||"要確認")}</strong>
+        </div>
+        <div class="spot-job-info-item">
+          <span class="spot-job-label">稼働日</span>
+          <strong>📅 ${esc(date||"日程要確認")}</strong>
+        </div>
+        <div class="spot-job-info-item">
+          <span class="spot-job-label">単価</span>
+          <strong>💴 ${esc(price)}</strong>
+        </div>
+        <div class="spot-job-info-item">
+          <span class="spot-job-label">通勤</span>
+          <strong>${commuteHtml||"🚃 指定なし"}</strong>
+        </div>
+      </div>
+
+      <div class="job-card-sub spot-job-card-sub">
+        <span>🏢 ${esc(x.sourceCompany||"案件元要確認")}</span>
+        <span class="job-mini-tag">${esc(inferCareer(x))}</span>
+        ${remote?'<span class="job-mini-tag">リモート</span>':""}
+        ${travel?'<span class="job-mini-tag">出張あり</span>':""}
+        ${x.beginnerAvailability?`<span class="job-mini-tag">経験:${esc(x.beginnerAvailability)}</span>`:""}
+      </div>
+    </div>
+
+    <details class="job-card-details">
+      <summary>詳細を見る</summary>
+      <div class="remarks">${esc(x.originalText||x.remarks||"詳細情報はありません。")}</div>
+    </details>
+  </article>`;
+}
+
 function renderJobSearchResults(){
   wcFixJobSortLayoutV7490_();
   /* WC-7.47.0: 取得済み候補を総合点順に表示 */
@@ -3996,7 +4092,7 @@ function renderJobSearchResults(){
       isUndecidedLocationJob &&
       !samePrefecture;
 
-    // WC-7.50.9: 未実測案件はここで落とさず、通勤要確認として残す。
+    // WC-7.51.0: 未実測案件はここで落とさず、通勤要確認として残す。
 
     /*
      * WC-7.43.7
@@ -4004,7 +4100,7 @@ function renderJobSearchResults(){
      * 120分超だけハード除外。
      */
     /*
-     * WC-7.50.9 段階式通勤判定
+     * WC-7.51.0 段階式通勤判定
      * 未実測・取得失敗の案件は「通勤要確認」で残す。
      * 実測できて120分を超えた案件だけ除外する。
      */
@@ -4023,7 +4119,7 @@ function renderJobSearchResults(){
     const payOk=true;
 
     /*
-     * WC-7.50.9
+     * WC-7.51.0
      * searchMatchingJobs から返った案件は、職種・エリア・リモート・出張・
      * キャリア・経験・キーワード等をサーバー側ですでに判定済み。
      *
@@ -4174,23 +4270,25 @@ function renderJobSearchResults(){
   }
 
   box.innerHTML=items.map(x=>{
+    const spot=isSpotJob_(x);
+
+    // WC-7.51.0: スポットは長期案件用の採点UIを使わない。
+    if(jobSearchMode==="spot"||spot){
+      return wcSpotCardHtmlV7510_(x,originStation,maxMinutes);
+    }
+
     const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
-    const commuteFallbackBadge=originStation&&routeInfo&&!getValidJobCommuteMinutes_(routeInfo)
-      ? `<span class="tag">🚃 通勤要確認</span>`
-      : "";
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
-    const textCandidateReason=getJobTextCandidateReason_(x,originStation,maxMinutes);
-    const areaCompatible=isOriginAreaCompatible_(x,originStation);
-    const spot=isSpotJob_(x);
     const remote=isRemoteJob_(x);
     const travel=isTravelJob_(x);
     const date=getJobDate_(x);
+
     return `<article class="job-result-card">${wcRankingBreakdownHtmlV7490_(x.__wcSafeRanking)}
       <div class="job-card-main">
         <div class="job-card-title-row">
-          <span class="job-kind-badge ${spot?'spot':'long'}">${spot?'スポット':'長期案件'}</span>
+          <span class="job-kind-badge long">長期案件</span>
           <h3>${esc(getJobDisplayName_(x))}</h3>
         </div>
         <div class="job-card-meta">
