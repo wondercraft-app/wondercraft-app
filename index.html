@@ -24,7 +24,7 @@ input,select,textarea{width:100%;min-height:46px;padding:10px 12px;border:1px so
 .interview-card{display:grid!important;grid-template-columns:190px minmax(0,1fr)!important;gap:14px;padding:0;overflow:hidden}.interview-time{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:152px;padding:14px 8px;color:#fff;background:linear-gradient(160deg,#0a3478,#1769aa)}.interview-time strong{font-size:22px;letter-spacing:.02em}.interview-time span{margin-top:5px;font-size:11px;font-weight:800;opacity:.8}.interview-body{padding:15px 15px 15px 0}.interview-body h3{font-size:20px}.interview-details{grid-template-columns:6.5em 1fr;margin-top:4px}
 .loading,.empty,.error{padding:28px 14px;text-align:center;border:1px solid var(--border);border-radius:16px;background:#fff}.error{color:var(--danger)}.message{min-height:24px;margin-top:10px;font-size:14px}.message.error{color:var(--danger)}.message.success{color:#067647}
 .modal{position:fixed;inset:0;z-index:100}.backdrop{position:absolute;inset:0;background:#11182799}.modal-panel{position:absolute;left:0;right:0;bottom:0;max-height:93vh;overflow:auto;padding:16px;background:#fff;border-radius:20px 20px 0 0}.modal-panel>header{position:sticky;top:-16px;z-index:2;display:flex;justify-content:space-between;align-items:center;margin:-16px -16px 14px;padding:15px;background:#fff;border-bottom:1px solid var(--border)}.modal-panel header h2{margin:0}.modal-panel header button{width:40px;height:40px;border:1px solid var(--border);border-radius:11px;background:#fff;font-size:25px}.form-grid{display:grid;gap:11px}.form-grid label{display:grid;gap:5px;color:var(--muted);font-size:13px;font-weight:800}.modal-panel footer{position:sticky;bottom:-16px;display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:14px -16px -16px;padding:12px 16px calc(14px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--border)}
-.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;grid-template-columns:repeat(4,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:#fffffff2;border-top:1px solid var(--border);backdrop-filter:blur(15px)}.bottom-nav button{display:grid;place-items:center;gap:1px;min-height:52px;border:0;border-radius:11px;color:var(--muted);background:transparent;font-size:11px;font-weight:800}.bottom-nav button.active{color:var(--navy);background:var(--soft)}.nav-icon{font-size:21px;line-height:1}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;grid-template-columns:repeat(5,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:#fffffff2;border-top:1px solid var(--border);backdrop-filter:blur(15px)}.bottom-nav button{display:grid;place-items:center;gap:1px;min-height:52px;border:0;border-radius:11px;color:var(--muted);background:transparent;font-size:11px;font-weight:800}.bottom-nav button.active{color:var(--navy);background:var(--soft)}.nav-icon{font-size:21px;line-height:1}
 @media(max-width:420px){.interview-card{grid-template-columns:132px minmax(0,1fr)!important}.interview-time strong{font-size:19px}.interview-body{padding-right:12px}.interview-details{grid-template-columns:6em 1fr;font-size:13px}}
 @media(min-width:680px){.dashboard{grid-template-columns:repeat(4,1fr)}.filters{grid-template-columns:2fr 1fr 1fr 1fr 1fr}.form-grid{grid-template-columns:1fr 1fr}.modal-panel{top:4vh;bottom:auto;width:min(760px,94vw);margin:auto;border-radius:20px}.full{grid-column:1/-1}}
 
@@ -330,7 +330,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.51.0-spot-card">
+  <link rel="stylesheet" href="./style.css?v=7.51.1-spot-date-hide-matching">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -344,7 +344,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.51.0</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.51.1</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -359,7 +359,6 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <button type="button" data-view="jobsearch"><span class="menu-line-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.7"/><path d="m14.8 14.8 5 5"/></svg></span><span>案件検索（希望条件から探す）</span></button>
         <button type="button" data-view="candidates">♙ <span>求職者</span></button>
         <button type="button" data-view="progress">▣ <span>案件進捗</span></button>
-        <button type="button" data-view="matching">◎ <span>マッチング</span></button>
         <div class="menu-divider"></div>
         <div id="managementMenuGroup" class="management-menu-group">
           <p>⚙ 管理メニュー</p>
@@ -671,12 +670,11 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     </section>
   </div>
 
-  <nav class="bottom-nav six-nav" aria-label="メインメニュー">
+  <nav class="bottom-nav five-nav" aria-label="メインメニュー">
     <button class="active" type="button" data-view="home"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.7 12 3.8l8.5 6.9v9.1a1 1 0 0 1-1 1h-5.2v-6.2H9.7v6.2H4.5a1 1 0 0 1-1-1z"/></svg></span><span class="nav-label">ホーム</span></button>
     <button type="button" data-view="candidates"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.2" r="3.2"/><path d="M5.6 20.2c.5-4 2.7-6.4 6.4-6.4s5.9 2.4 6.4 6.4z"/></svg></span><span class="nav-label">求職者</span></button>
     <button type="button" data-view="progress"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="3.8" width="15" height="16.4" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span class="nav-label">案件進捗</span></button>
     <button type="button" data-view="jobsearch"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.7"/><path d="m14.8 14.8 5 5"/></svg></span><span class="nav-label">案件検索</span></button>
-    <button type="button" data-view="matching"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.6"/></svg></span><span class="nav-label">マッチング</span></button>
     <button type="button" data-view="management"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.8v2.1M12 19.1v2.1M21.2 12h-2.1M4.9 12H2.8M18.5 5.5 17 7M7 17l-1.5 1.5M18.5 18.5 17 17M7 7 5.5 5.5"/><circle cx="12" cy="12" r="7.1"/></svg></span><span class="nav-label">管理</span></button>
   </nav>
 
@@ -722,9 +720,9 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.51.0-spot-card"></script>
-  <script src="./stations-data.js?v=7.51.0-spot-card"></script>
-  <script src="./app.js?v=7.51.0-spot-card"></script>
+  <script src="./config.js?v=7.51.1-spot-date-hide-matching"></script>
+  <script src="./stations-data.js?v=7.51.1-spot-date-hide-matching"></script>
+  <script src="./app.js?v=7.51.1-spot-date-hide-matching"></script>
 
 </body>
 </html>

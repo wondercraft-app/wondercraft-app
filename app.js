@@ -2020,7 +2020,7 @@ let jobSearchServerNextPage_=null;
 let jobSearchServerLoadingMore_=false;
 let jobSearchHistoricalFallback_=false;
 /*
- * WC-7.51.0
+ * WC-7.51.1
  * searchMatchingJobs の返却結果はサーバー側で検索条件を通過済み。
  * クライアント側で同じ条件を再判定すると、表記揺れで0件化するため
  * サーバー結果を正として扱う。
@@ -2935,7 +2935,7 @@ async function runStationAwareJobSearch_(options={}){
   if(!origin){updateJobRangeLabels();return;}
 
   /*
-   * WC-7.51.0 大量案件向け駅検索
+   * WC-7.51.1 大量案件向け駅検索
    * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
@@ -3923,7 +3923,7 @@ function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
 
 
 /*****************************************************************
- * WC-7.51.0 スポット専用表示
+ * WC-7.51.1 スポット専用表示
  *****************************************************************/
 function wcSpotPriceDisplayV7510_(value){
   const raw=String(value||"").trim();
@@ -3989,7 +3989,7 @@ function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
         </div>
         <div class="spot-job-info-item">
           <span class="spot-job-label">稼働日</span>
-          <strong>📅 ${esc(date||"日程要確認")}</strong>
+          <strong>📅 ${esc(date||"稼働日要確認")}</strong>
         </div>
         <div class="spot-job-info-item">
           <span class="spot-job-label">単価</span>
@@ -4092,7 +4092,7 @@ function renderJobSearchResults(){
       isUndecidedLocationJob &&
       !samePrefecture;
 
-    // WC-7.51.0: 未実測案件はここで落とさず、通勤要確認として残す。
+    // WC-7.51.1: 未実測案件はここで落とさず、通勤要確認として残す。
 
     /*
      * WC-7.43.7
@@ -4100,7 +4100,7 @@ function renderJobSearchResults(){
      * 120分超だけハード除外。
      */
     /*
-     * WC-7.51.0 段階式通勤判定
+     * WC-7.51.1 段階式通勤判定
      * 未実測・取得失敗の案件は「通勤要確認」で残す。
      * 実測できて120分を超えた案件だけ除外する。
      */
@@ -4119,7 +4119,7 @@ function renderJobSearchResults(){
     const payOk=true;
 
     /*
-     * WC-7.51.0
+     * WC-7.51.1
      * searchMatchingJobs から返った案件は、職種・エリア・リモート・出張・
      * キャリア・経験・キーワード等をサーバー側ですでに判定済み。
      *
@@ -4272,7 +4272,7 @@ function renderJobSearchResults(){
   box.innerHTML=items.map(x=>{
     const spot=isSpotJob_(x);
 
-    // WC-7.51.0: スポットは長期案件用の採点UIを使わない。
+    // WC-7.51.1: スポットは長期案件用の採点UIを使わない。
     if(jobSearchMode==="spot"||spot){
       return wcSpotCardHtmlV7510_(x,originStation,maxMinutes);
     }
@@ -4391,9 +4391,12 @@ function normalizeSpotDate_(value){
 
 function getJobDate_(job){
   /*
-   * WC-7.43.1
-   * matchingJobs API の job.date は案件管理表の「更新日」。
-   * スポット稼働日ではないため検索日付判定には使わない。
+   * WC-7.51.1
+   * スポット稼働日を優先順で取得。
+   * 1. 明示的な稼働日フィールド
+   * 2. 構造化された開始時期
+   * 3. 原文・備考・案件名
+   * 4. スポット検索時だけ案件管理の date を最後の候補として使用
    */
   for(const value of [
     job.workDate,
@@ -4402,15 +4405,24 @@ function getJobDate_(job){
     job.shiftDate,
     job.scheduleDate,
     job.workDates,
-    job.eventDates
+    job.eventDates,
+    job.startTiming
   ]){
     const date=normalizeSpotDate_(value);
     if(date)return date;
   }
 
-  return normalizeSpotDate_(
+  const fromText=normalizeSpotDate_(
     [job.originalText,job.remarks,job.shopName].join(" ")
   );
+  if(fromText)return fromText;
+
+  if(jobSearchMode==="spot"||job.isSpot===true||job.spot===true){
+    const fallback=normalizeSpotDate_(job.date);
+    if(fallback)return fallback;
+  }
+
+  return "";
 }
 
 function isSpotJob_(job){
