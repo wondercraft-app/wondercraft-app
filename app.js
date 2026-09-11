@@ -2020,7 +2020,7 @@ let jobSearchServerNextPage_=null;
 let jobSearchServerLoadingMore_=false;
 let jobSearchHistoricalFallback_=false;
 /*
- * WC-7.51.1
+ * WC-7.51.2
  * searchMatchingJobs の返却結果はサーバー側で検索条件を通過済み。
  * クライアント側で同じ条件を再判定すると、表記揺れで0件化するため
  * サーバー結果を正として扱う。
@@ -2935,7 +2935,7 @@ async function runStationAwareJobSearch_(options={}){
   if(!origin){updateJobRangeLabels();return;}
 
   /*
-   * WC-7.51.1 大量案件向け駅検索
+   * WC-7.51.2 大量案件向け駅検索
    * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
@@ -3923,7 +3923,7 @@ function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
 
 
 /*****************************************************************
- * WC-7.51.1 スポット専用表示
+ * WC-7.51.2 スポット専用表示
  *****************************************************************/
 function wcSpotPriceDisplayV7510_(value){
   const raw=String(value||"").trim();
@@ -3964,7 +3964,7 @@ function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
     ? getValidJobCommuteMinutes_(routeInfo)
     : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
 
-  const date=getJobDate_(x);
+  const date=wcSpotScheduleDisplayV7512_(x);
   const remote=isRemoteJob_(x);
   const travel=isTravelJob_(x);
   const price=wcSpotPriceDisplayV7510_(x.price);
@@ -4092,7 +4092,7 @@ function renderJobSearchResults(){
       isUndecidedLocationJob &&
       !samePrefecture;
 
-    // WC-7.51.1: 未実測案件はここで落とさず、通勤要確認として残す。
+    // WC-7.51.2: 未実測案件はここで落とさず、通勤要確認として残す。
 
     /*
      * WC-7.43.7
@@ -4100,7 +4100,7 @@ function renderJobSearchResults(){
      * 120分超だけハード除外。
      */
     /*
-     * WC-7.51.1 段階式通勤判定
+     * WC-7.51.2 段階式通勤判定
      * 未実測・取得失敗の案件は「通勤要確認」で残す。
      * 実測できて120分を超えた案件だけ除外する。
      */
@@ -4119,7 +4119,7 @@ function renderJobSearchResults(){
     const payOk=true;
 
     /*
-     * WC-7.51.1
+     * WC-7.51.2
      * searchMatchingJobs から返った案件は、職種・エリア・リモート・出張・
      * キャリア・経験・キーワード等をサーバー側ですでに判定済み。
      *
@@ -4272,7 +4272,7 @@ function renderJobSearchResults(){
   box.innerHTML=items.map(x=>{
     const spot=isSpotJob_(x);
 
-    // WC-7.51.1: スポットは長期案件用の採点UIを使わない。
+    // WC-7.51.2: スポットは長期案件用の採点UIを使わない。
     if(jobSearchMode==="spot"||spot){
       return wcSpotCardHtmlV7510_(x,originStation,maxMinutes);
     }
@@ -4368,61 +4368,84 @@ function setJobSearchMode_(mode){
 
 function normalizeSpotDate_(value){
   if(!value)return "";
+  const text=String(value).normalize("NFKC").trim();
 
-  const text=String(value).trim();
-
-  const full=text.match(
-    /(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/
-  );
+  const full=text.match(/(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
   if(full){
     return `${full[1]}-${String(full[2]).padStart(2,"0")}-${String(full[3]).padStart(2,"0")}`;
   }
 
-  const monthDay=text.match(
-    /(?:^|\D)(\d{1,2})[\/\-.月](\d{1,2})(?:日|\D|$)/
-  );
+  const monthDay=text.match(/(?:^|\D)(\d{1,2})[\/\-.月](\d{1,2})(?:日|\D|$)/);
   if(monthDay){
     const year=new Date().getFullYear();
     return `${year}-${String(monthDay[1]).padStart(2,"0")}-${String(monthDay[2]).padStart(2,"0")}`;
   }
+  return "";
+}
 
+function wcSpotScheduleDisplayV7512_(job){
+  // 明示的な稼働日フィールドを最優先。更新日はここでは使わない。
+  for(const value of [
+    job?.workDate,job?.eventDate,job?.shiftDate,job?.scheduleDate,
+    job?.workDates,job?.eventDates
+  ]){
+    const s=wcSpotScheduleTextV7512_(value);
+    if(s)return s;
+  }
+
+  const text=[job?.originalText,job?.remarks,job?.description,job?.detail,job?.shopName]
+    .filter(Boolean).join("\n").normalize("NFKC");
+  if(!text)return "";
+
+  // ラベル付き日程を最優先。
+  const labeled=text.match(/(?:稼働日程|稼働日|日程|実施日|勤務日|開催日|勤務期間|期間)\s*[：:]\s*([^\n\r]{1,120})/i);
+  if(labeled){
+    const s=wcSpotScheduleTextV7512_(labeled[1]);
+    if(s)return s;
+  }
+
+  // 原文中の日付は、勤務・催事等の語が近くにある場合だけ採用。
+  const dateRe=/(?:20\d{2}[\/.\-年]\d{1,2}[\/.\-月]\d{1,2}日?|\d{1,2}月\d{1,2}日|\d{1,2}[\/.\-]\d{1,2})(?:\s*[\(（][月火水木金土日祝][\)）])?/g;
+  const matches=[...text.matchAll(dateRe)];
+  for(const m of matches){
+    const pos=m.index||0;
+    const around=text.slice(Math.max(0,pos-45),Math.min(text.length,pos+m[0].length+45));
+    if(/稼働|勤務|日程|実施|開催|催事|イベント|入店|シフト|期間/i.test(around)){
+      const s=wcSpotScheduleTextV7512_(around);
+      if(s)return s;
+    }
+  }
+  return "";
+}
+
+function wcSpotScheduleTextV7512_(value){
+  let s=String(value??"").normalize("NFKC").trim();
+  if(!s)return "";
+
+  const dateRe=/(?:20\d{2}[\/.\-年]\d{1,2}[\/.\-月]\d{1,2}日?|\d{1,2}月\d{1,2}日|\d{1,2}[\/.\-]\d{1,2})(?:\s*[\(（][月火水木金土日祝][\)）])?/g;
+  const dates=s.match(dateRe)||[];
+  if(dates.length){
+    const normalized=dates.map(v=>v
+      .replace(/20\d{2}[\/.\-年](\d{1,2})[\/.\-月](\d{1,2})日?/,"$1/$2")
+      .replace(/(\d{1,2})月(\d{1,2})日/,"$1/$2")
+      .replace(/(\d{1,2})[.\-](\d{1,2})/,"$1/$2"));
+    const unique=[...new Set(normalized)];
+    return unique.slice(0,5).join("・")+(unique.length>5?" ほか":"");
+  }
+
+  if(/応相談|要相談|随時|毎週|平日|土日|週末|シフト/i.test(s)){
+    return s.replace(/\s+/g," ").slice(0,60);
+  }
   return "";
 }
 
 function getJobDate_(job){
   /*
-   * WC-7.51.1
-   * スポット稼働日を優先順で取得。
-   * 1. 明示的な稼働日フィールド
-   * 2. 構造化された開始時期
-   * 3. 原文・備考・案件名
-   * 4. スポット検索時だけ案件管理の date を最後の候補として使用
+   * WC-7.51.2
+   * スポット表示では「案件更新日」を稼働日として使わない。
+   * 明示的な勤務日、または原文内で勤務・催事に紐づく日付だけを表示する。
    */
-  for(const value of [
-    job.workDate,
-    job.startDate,
-    job.eventDate,
-    job.shiftDate,
-    job.scheduleDate,
-    job.workDates,
-    job.eventDates,
-    job.startTiming
-  ]){
-    const date=normalizeSpotDate_(value);
-    if(date)return date;
-  }
-
-  const fromText=normalizeSpotDate_(
-    [job.originalText,job.remarks,job.shopName].join(" ")
-  );
-  if(fromText)return fromText;
-
-  if(jobSearchMode==="spot"||job.isSpot===true||job.spot===true){
-    const fallback=normalizeSpotDate_(job.date);
-    if(fallback)return fallback;
-  }
-
-  return "";
+  return wcSpotScheduleDisplayV7512_(job);
 }
 
 function isSpotJob_(job){
