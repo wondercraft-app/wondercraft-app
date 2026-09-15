@@ -330,7 +330,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 }
 
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.51.3-default-regular">
+  <link rel="stylesheet" href="./style.css?v=7.51.4-regular-strict-holiday">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -344,7 +344,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.51.3</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.51.4</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -508,6 +508,13 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
                 <option value="exclude" selected>リモート含まない</option>
                 <option value="include">リモート含む</option>
                 <option value="only">リモートのみ</option>
+              </select>
+            </label>
+            <label>休日
+              <select id="jobHolidayFilter">
+                <option value="">指定なし</option>
+                <option value="weekend">土日休み</option>
+                <option value="weekend_holiday">土日祝休み</option>
               </select>
             </label>
             <label class="job-origin-station-field">起点駅
@@ -720,9 +727,9 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.51.3-default-regular"></script>
-  <script src="./stations-data.js?v=7.51.3-default-regular"></script>
-  <script src="./app.js?v=7.51.3-default-regular"></script>
+  <script src="./config.js?v=7.51.4-regular-strict-holiday"></script>
+  <script src="./stations-data.js?v=7.51.4-regular-strict-holiday"></script>
+  <script src="./app.js?v=7.51.4-regular-strict-holiday"></script>
 
 </body>
 </html>
