@@ -329,8 +329,28 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   .spot-job-result-card .job-card-details{padding:0 16px 14px!important}
 }
 
+
+/* WC-7.51.6 案件検索：PC横長画面でも中央配置 */
+#jobSearchSection{
+  width:min(1480px,calc(100% - 48px))!important;
+  max-width:1480px!important;
+  margin-left:auto!important;
+  margin-right:auto!important;
+}
+#jobSearchSection .job-search-layout,
+#jobSearchSection .matching-hero,
+#jobSearchSection .job-search-mode-tabs{
+  width:100%!important;
+  margin-left:auto!important;
+  margin-right:auto!important;
+  box-sizing:border-box!important;
+}
+@media(max-width:760px){
+  #jobSearchSection{width:calc(100% - 24px)!important;}
+}
+
 </style>
-  <link rel="stylesheet" href="./style.css?v=7.51.5-holiday-runtime-fix">
+  <link rel="stylesheet" href="./style.css?v=7.51.6-ui-commute-fix">
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -344,7 +364,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.51.5</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.51.6</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -413,7 +433,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
         <p class="login-note">初回ログイン後は、この端末で自動ログインします。</p>
       </div>
     </section>
-    <section id="systemPanel" class="setup-panel" aria-live="polite">
+    <section id="systemPanel" class="setup-panel" aria-live="polite" hidden>
       <h2 id="systemTitle">接続確認中</h2>
       <p id="systemMessage">システムへ接続しています。</p>
       <button id="systemRetryBtn" class="primary" type="button" hidden>再試行</button>
@@ -727,9 +747,9 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
     }, 8000);
   </script>
 
-  <script src="./config.js?v=7.51.5-holiday-runtime-fix"></script>
-  <script src="./stations-data.js?v=7.51.5-holiday-runtime-fix"></script>
-  <script src="./app.js?v=7.51.5-holiday-runtime-fix"></script>
+  <script src="./config.js?v=7.51.6-ui-commute-fix"></script>
+  <script src="./stations-data.js?v=7.51.6-ui-commute-fix"></script>
+  <script src="./app.js?v=7.51.6-ui-commute-fix"></script>
 
 </body>
 </html>
