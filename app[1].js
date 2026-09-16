@@ -316,8 +316,18 @@ async function registerWonderCraftServiceWorker_(){
   if(!("serviceWorker" in navigator)) return;
 
   try{
+    // WC-7.51.9: 古いPWAキャッシュで旧app.jsが残る問題を一度クリアする。
+    if(localStorage.getItem("wc_cache_reset_7519")!=="1"){
+      const regs=await navigator.serviceWorker.getRegistrations();
+      for(const r of regs){try{await r.unregister();}catch(_e){}}
+      if(window.caches){
+        const keys=await caches.keys();
+        await Promise.all(keys.map(k=>caches.delete(k)));
+      }
+      localStorage.setItem("wc_cache_reset_7519","1");
+    }
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.42.0-progress-search-speed",
+      "./service-worker.js?v=7.51.9-commute-key-cache-fix",
       { updateViaCache:"none" }
     );
 
@@ -805,7 +815,7 @@ async function initialize(force=false){
       }
     }
 
-    // WC-7.51.8: 正常な接続確認中は中間画面を見せない。
+    // WC-7.51.9: 正常な接続確認中は中間画面を見せない。
     // 接続失敗・メンテナンス時だけ systemPanel を表示する。
     if(!usedCache&&$("appPanel").hidden){
       $("systemPanel").hidden=true;
@@ -1201,7 +1211,7 @@ function switchView(view){
   const previousView=state.view;
   state.view=view;
 
-  // WC-7.51.8: 案件検索を開いた時は常勤案件を基本モードにする。
+  // WC-7.51.9: 案件検索を開いた時は常勤案件を基本モードにする。
   // スポットは案件検索画面内で明示的に切り替えた時だけ検索する。
   if(view==="jobsearch" && previousView!=="jobsearch"){
     setJobSearchMode_("long");
@@ -2031,7 +2041,7 @@ let jobSearchServerNextPage_=null;
 let jobSearchServerLoadingMore_=false;
 let jobSearchHistoricalFallback_=false;
 /*
- * WC-7.51.8
+ * WC-7.51.9
  * searchMatchingJobs の返却結果はサーバー側で検索条件を通過済み。
  * クライアント側で同じ条件を再判定すると、表記揺れで0件化するため
  * サーバー結果を正として扱う。
@@ -2949,7 +2959,7 @@ async function runStationAwareJobSearch_(options={}){
   if(!origin){updateJobRangeLabels();return;}
 
   /*
-   * WC-7.51.8 大量案件向け駅検索
+   * WC-7.51.9 大量案件向け駅検索
    * 24件を6リクエスト並列でNAVITIMEへ投げる方式を廃止。
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
@@ -2986,24 +2996,24 @@ async function runStationAwareJobSearch_(options={}){
           rowNumbers:batch.map(job=>Number(job.rowNumber)),
           // WC-7.42.0: GASが案件管理シートをバッチごとに再読込しないためのスナップショット
           jobs:batch.map(job=>({
-            rowNumber:Number(job.rowNumber),shopName:job.shopName||"",prefecture:job.prefecture||"",area:job.area||"",
+            rowNumber:Number(job.rowNumber),commuteKey:wcCommuteJobKeyV7519_(job),shopName:job.shopName||"",prefecture:job.prefecture||"",area:job.area||"",
             sourceCompany:job.sourceCompany||"",price:job.price||"",originalText:job.originalText||"",
             storeAddress:job.storeAddress||"",storeLat:job.storeLat||"",storeLng:job.storeLng||"",
             nearestStation:job.nearestStation||job.station||job.storeStation||""
           }))
         });
         const rows=Array.isArray(result?.results)?result.results:[];
-        rows.forEach(row=>{jobStationCommuteMap[String(row.rowNumber)]=row;if(row?.ok&&Number.isFinite(Number(row.minutes)))successCount++;});
+        rows.forEach(row=>{wcSetCommuteResultV7519_(row);if(row?.ok&&Number.isFinite(Number(row.minutes)))successCount++;});
       }catch(batchError){
         failedBatchCount++;
         const message=String(batchError?.message||"");
         if(/未対応のAPI action|stationJobCommutes/i.test(message)){jobStationApiUnavailable=true;throw batchError;}
-        batch.forEach(job=>{jobStationCommuteMap[String(job.rowNumber)]={
-          rowNumber:Number(job.rowNumber),ok:false,minutes:null,
+        batch.forEach(job=>{wcSetCommuteResultV7519_({
+          rowNumber:Number(job.rowNumber),commuteKey:wcCommuteJobKeyV7519_(job),ok:false,minutes:null,
           reason:"BATCH_ERROR",
           diagnostic:`通勤APIエラー：${message||"応答取得失敗"}`,
           commuteUnverified:true
-        };});
+        });});
       }finally{
         completed++;
         updateWcLoadingText_?.(`${originDisplay}からの通勤時間を確認中… ${completed}/${batches.length}`);
@@ -3020,13 +3030,13 @@ async function runStationAwareJobSearch_(options={}){
     if(successCount===0){
       const fallbackCount=(jobSearchItems||[]).filter(job=>
         wcCommuteFallbackCandidateV7505_(
-          jobStationCommuteMap[String(job.rowNumber)]||null,
+          wcGetCommuteResultV7519_(job),
           Number($("jobDistanceRange")?.value||60)
         )
       ).length;
 
       if(fallbackCount===0){
-        // WC-7.51.8:
+        // WC-7.51.9:
         // 候補は残すが、通勤APIの結果マップ自体は無効化しない。
         // 以前はここで false に戻していたため、GASが返した診断内容まで
         // カード側から見えなくなり、常に単なる「通勤要確認」に見えていた。
@@ -3041,7 +3051,7 @@ async function runStationAwareJobSearch_(options={}){
       box?.insertAdjacentHTML("afterbegin",`<div class="job-search-notice compact">通勤時間は段階的に確認しています。未実測案件は「通勤要確認」として残し、実測できた案件を優先表示します。</div>`);
     }
   }catch(error){
-    // WC-7.51.8: 既に受け取った通勤結果・診断は保持する。
+    // WC-7.51.9: 既に受け取った通勤結果・診断は保持する。
     jobStationSearchApplied=Object.keys(jobStationCommuteMap||{}).length>0;
     const message=String(error?.message||"");jobStationApiUnavailable=/未対応のAPI action|stationJobCommutes/i.test(message);
     renderJobSearchResults();
@@ -3945,7 +3955,7 @@ function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
 
 
 /*****************************************************************
- * WC-7.51.8 スポット専用表示
+ * WC-7.51.9 スポット専用表示
  *****************************************************************/
 function wcSpotPriceDisplayV7510_(value){
   const raw=String(value||"").trim();
@@ -3981,7 +3991,7 @@ function wcSpotPriceDisplayV7510_(value){
 }
 
 function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
-  const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+  const routeInfo=wcGetCommuteResultV7519_(x);
   const commute=originStation
     ? getValidJobCommuteMinutes_(routeInfo)
     : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4091,7 +4101,7 @@ function renderJobSearchResults(){
     x=wcPrepareJobSearchItem_(x);
     const text=x.__wcSearchText;
     const pay=x.__wcPay;
-    const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+    const routeInfo=wcGetCommuteResultV7519_(x);
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4134,7 +4144,7 @@ function renderJobSearchResults(){
       isUndecidedLocationJob &&
       !samePrefecture;
 
-    // WC-7.51.8: 未実測案件はここで落とさず、通勤要確認として残す。
+    // WC-7.51.9: 未実測案件はここで落とさず、通勤要確認として残す。
 
     /*
      * WC-7.43.7
@@ -4142,7 +4152,7 @@ function renderJobSearchResults(){
      * 120分超だけハード除外。
      */
     /*
-     * WC-7.51.8 段階式通勤判定
+     * WC-7.51.9 段階式通勤判定
      * 未実測・取得失敗の案件は「通勤要確認」で残す。
      * 実測できて120分を超えた案件だけ除外する。
      */
@@ -4161,7 +4171,7 @@ function renderJobSearchResults(){
     const payOk=true;
 
     /*
-     * WC-7.51.8
+     * WC-7.51.9
      * searchMatchingJobs から返った案件は、職種・エリア・リモート・出張・
      * キャリア・経験・キーワード等をサーバー側ですでに判定済み。
      *
@@ -4171,7 +4181,7 @@ function renderJobSearchResults(){
      * サーバー検索時は通勤120分超だけ追加除外し、それ以外は候補表示する。
      */
     if(jobSearchServerAuthoritative_){
-      // WC-7.51.8: サーバー判定とブラウザ判定の差があっても、
+      // WC-7.51.9: サーバー判定とブラウザ判定の差があっても、
       // 常勤タブにスポットを混ぜない。休日条件も最終防御する。
       if(!modeOk||!wcHolidayMatchesV7514_(x,holidayMode)||!commuteOk)return false;
       experienceBaseCount++;
@@ -4214,7 +4224,7 @@ function renderJobSearchResults(){
    */
   items=items.map(x=>{
     const prepared=wcPrepareJobSearchItem_(x);
-    const routeInfo=jobStationCommuteMap[String(prepared.rowNumber)]||null;
+    const routeInfo=wcGetCommuteResultV7519_(prepared);
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(prepared));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4316,12 +4326,12 @@ function renderJobSearchResults(){
   box.innerHTML=items.map(x=>{
     const spot=isSpotJob_(x);
 
-    // WC-7.51.8: スポットは長期案件用の採点UIを使わない。
+    // WC-7.51.9: スポットは長期案件用の採点UIを使わない。
     if(jobSearchMode==="spot"||spot){
       return wcSpotCardHtmlV7510_(x,originStation,maxMinutes);
     }
 
-    const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+    const routeInfo=wcGetCommuteResultV7519_(x);
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4485,7 +4495,7 @@ function wcSpotScheduleTextV7512_(value){
 
 function getJobDate_(job){
   /*
-   * WC-7.51.8
+   * WC-7.51.9
    * スポット表示では「案件更新日」を稼働日として使わない。
    * 明示的な勤務日、または原文内で勤務・催事に紐づく日付だけを表示する。
    */
