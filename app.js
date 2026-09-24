@@ -1,9 +1,10 @@
+/* WC-7.52.1 実ファイル同期・通勤結果直接紐付け版 */
 /* WC-7.48.2 ランキング内訳直接受渡し版 */
 /* WonderCraft PWA WC-7.45.0 - サーバー側案件検索・根本高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.49.1";
+const WC_PWA_BUILD="WC-7.52.1";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -317,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.42.0-progress-search-speed",
+      "./service-worker.js?v=7.52.1-commute-sync",
       { updateViaCache:"none" }
     );
 
@@ -2940,6 +2941,7 @@ async function runStationAwareJobSearch_(options={}){
     jobStationSearchApplied=false;
     jobStationCommuteMap={};
     jobStationApiUnavailable=false;
+    wcCommuteDiagV7521_={requested:0,returned:0,measured:0,failed:0};
   }else{
     // WC-7.49.1: 「次の候補」取得時も既に測定済みの通勤時間を保持する。
     jobStationSearchApplied=false;
@@ -2954,6 +2956,9 @@ async function runStationAwareJobSearch_(options={}){
    * まず最大12件を3件ずつ、1リクエストずつ順番に確認する。
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
    */
+  (jobSearchItems||[]).forEach((job,index)=>{
+    if(!job.__wcCommuteId) job.__wcCommuteId=`WC7521-${Number(job.rowNumber||0)}-${index}`;
+  });
   const candidates=(jobSearchItems||[])
     .filter(job=>
       Number(job.rowNumber)>0 &&
@@ -2981,24 +2986,42 @@ async function runStationAwareJobSearch_(options={}){
       if(index>=batches.length)return;
       const batch=batches[index];
       try{
+        wcCommuteDiagV7521_.requested+=batch.length;
         const result=await apiPost("stationJobCommutes",{
           station:originDisplay,stationData:selectedOrigin,
           rowNumbers:batch.map(job=>Number(job.rowNumber)),
           // WC-7.42.0: GASが案件管理シートをバッチごとに再読込しないためのスナップショット
           jobs:batch.map(job=>({
-            rowNumber:Number(job.rowNumber),shopName:job.shopName||"",prefecture:job.prefecture||"",area:job.area||"",
+            rowNumber:Number(job.rowNumber),clientCommuteId:job.__wcCommuteId||"",shopName:job.shopName||"",prefecture:job.prefecture||"",area:job.area||"",
             sourceCompany:job.sourceCompany||"",price:job.price||"",originalText:job.originalText||"",
             storeAddress:job.storeAddress||"",storeLat:job.storeLat||"",storeLng:job.storeLng||"",
             nearestStation:job.nearestStation||job.station||job.storeStation||""
           }))
         });
         const rows=Array.isArray(result?.results)?result.results:[];
-        rows.forEach(row=>{jobStationCommuteMap[String(row.rowNumber)]=row;if(row?.ok&&Number.isFinite(Number(row.minutes)))successCount++;});
+        wcCommuteDiagV7521_.returned+=rows.length;
+        rows.forEach(row=>{
+          jobStationCommuteMap[String(row.rowNumber)]=row;
+          const target=(jobSearchItems||[]).find(job=>
+            (row.clientCommuteId && row.clientCommuteId===job.__wcCommuteId) ||
+            Number(job.rowNumber)===Number(row.rowNumber)
+          );
+          if(target) target.__wcCommute=row;
+          const measured=row?.ok && row.minutes!==null && row.minutes!==undefined &&
+            row.minutes!=="" && Number.isFinite(Number(row.minutes));
+          if(measured){successCount++;wcCommuteDiagV7521_.measured++;}
+          else wcCommuteDiagV7521_.failed++;
+        });
       }catch(batchError){
         failedBatchCount++;
         const message=String(batchError?.message||"");
         if(/未対応のAPI action|stationJobCommutes/i.test(message)){jobStationApiUnavailable=true;throw batchError;}
-        batch.forEach(job=>{jobStationCommuteMap[String(job.rowNumber)]={rowNumber:Number(job.rowNumber),ok:false,minutes:null,reason:"BATCH_TIMEOUT"};});
+        batch.forEach(job=>{
+          const failed={rowNumber:Number(job.rowNumber),clientCommuteId:job.__wcCommuteId||"",ok:false,minutes:null,reason:"BATCH_TIMEOUT"};
+          jobStationCommuteMap[String(job.rowNumber)]=failed;
+          job.__wcCommute=failed;
+          wcCommuteDiagV7521_.failed++;
+        });
       }finally{
         completed++;
         updateWcLoadingText_?.(`${originDisplay}からの通勤時間を確認中… ${completed}/${batches.length}`);
@@ -3023,7 +3046,7 @@ async function runStationAwareJobSearch_(options={}){
       if(fallbackCount===0){
         // 通勤APIが全面的に失敗した場合、318件などの検索候補を0件表示にしない。
         // 通勤時間は「未確認」として候補を残し、業務を止めない。
-        jobStationSearchApplied=false;
+        jobStationSearchApplied=true;
         renderJobSearchResults();
       }
 
@@ -3800,9 +3823,8 @@ function wcRankingBreakdownHtmlV7490_(safeRanking){
   const start=Number(r.startTimingPoints??0)||0;
 
   const commuteMinutes=
-    Number.isFinite(Number(r.commuteMinutes))
-      ? Number(r.commuteMinutes)
-      : null;
+    r.commuteMinutes!==null && r.commuteMinutes!==undefined && r.commuteMinutes!=="" &&
+    Number.isFinite(Number(r.commuteMinutes)) ? Number(r.commuteMinutes) : null;
 
   return `
     <div class="wc-ranking-box" style="margin:10px 0 12px;padding:12px;border:1px solid rgba(127,127,127,.22);border-radius:12px;">
@@ -3811,7 +3833,7 @@ function wcRankingBreakdownHtmlV7490_(safeRanking){
         <span style="font-weight:700;">${esc(wcRankingLabel_(score))}</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr auto;gap:5px 12px;font-size:13px;">
-        <span>🚃 通勤${commuteMinutes!==null?`（${commuteMinutes}分）`:""}</span><strong>${commute}/35</strong>
+        <span>🚃 通勤${commuteMinutes!==null?`（${commuteMinutes}分）`:"（未計測）"}</span><strong>${commute}/35</strong>
         <span>💰 単価</span><strong>${price}/35</strong>
         <span>🏬 案件タイプ</span><strong>${type}/15</strong>
         <span>📱 キャリア</span><strong>${career}/10</strong>
@@ -3973,7 +3995,7 @@ function wcSpotPriceDisplayV7510_(value){
 }
 
 function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
-  const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+  const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.rowNumber)]||null;
   const commute=originStation
     ? getValidJobCommuteMinutes_(routeInfo)
     : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4083,7 +4105,7 @@ function renderJobSearchResults(){
     x=wcPrepareJobSearchItem_(x);
     const text=x.__wcSearchText;
     const pay=x.__wcPay;
-    const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+    const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4313,7 +4335,7 @@ function renderJobSearchResults(){
       return wcSpotCardHtmlV7510_(x,originStation,maxMinutes);
     }
 
-    const routeInfo=jobStationCommuteMap[String(x.rowNumber)]||null;
+    const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4375,6 +4397,7 @@ let jobSearchMode="long";
 let jobSearchCurrentItems=[];
 let jobStationCommuteMap={};
 let jobStationSearchApplied=false;
+let wcCommuteDiagV7521_={requested:0,returned:0,measured:0,failed:0};
 let jobStationSearchOrigin="";
 let jobOriginStationSelection=null;
 let jobOriginStationActiveIndex=-1;
