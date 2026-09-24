@@ -1,10 +1,10 @@
-/* WC-7.52.4 全保有案件から距離先行10件選抜・通勤採点版 */
+/* WC-7.52.5 希望通勤内優先・未経験明示案件検索版 */
 /* WC-7.48.2 ランキング内訳直接受渡し版 */
 /* WonderCraft PWA WC-7.45.0 - サーバー側案件検索・根本高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.4";
+const WC_PWA_BUILD="WC-7.52.5";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.4-distance-first",
+      "./service-worker.js?v=7.52.5-commute-priority",
       { updateViaCache:"none" }
     );
 
@@ -2784,12 +2784,12 @@ async function runStationAwareJobSearch_(options={}){
           distanceFirst:!!selectedOriginForServer,
           station:selectedOriginForServer?`${selectedOriginForServer.name}駅`:"",
           stationData:selectedOriginForServer||null,
-          nearestLimit:10,
+          nearestLimit:20,
           fastSearch:true,
           chunkedSearch:true,
           page:requestedPage,
-          pageSize:selectedOriginForServer?10:40,
-          resultLimit:selectedOriginForServer?10:40
+          pageSize:selectedOriginForServer?20:40,
+          resultLimit:selectedOriginForServer?20:40
         }
       );
 
@@ -4293,12 +4293,29 @@ function renderJobSearchResults(){
     );
   }
 
+  if(jobSearchDistanceFirst_ && originStation){
+    // 希望時間内 → 60～120分の候補 → 未計測。同じ段階内だけ総合点順。
+    const tier=job=>{
+      const info=job.__wcCommute||jobStationCommuteMap[String(job.rowNumber)]||null;
+      const minutes=getValidJobCommuteMinutes_(info);
+      return minutes===null?2:(minutes<=maxMinutes?0:1);
+    };
+    items.sort((a,b)=>
+      tier(a)-tier(b)||
+      Number(b.__wcSafeRanking?.score||0)-Number(a.__wcSafeRanking?.score||0)||
+      Number(a.distanceEstimateKm??99999)-Number(b.distanceEstimateKm??99999)
+    );
+  }
+
+  if(jobSearchDistanceFirst_){
+    items=items.slice(0,10);
+  }
+
   const serverMatched=Number(jobSearchServerStats_?.filteredJobs);
-  const totalCount=
-    Number.isFinite(serverMatched)&&serverMatched>=0
-      ?serverMatched
-      :items.length;
-  const countSuffix=jobSearchServerStats_?.filteredJobsExact===false?"件以上":"件";
+  const totalCount=jobSearchDistanceFirst_
+    ?items.length
+    :(Number.isFinite(serverMatched)&&serverMatched>=0?serverMatched:items.length);
+  const countSuffix=!jobSearchDistanceFirst_&&jobSearchServerStats_?.filteredJobsExact===false?"件以上":"件";
   $("jobResultCount").textContent=`${totalCount.toLocaleString("ja-JP")}${countSuffix}`;
   const box=$("jobSearchResults");
   const diagnosticHtml=wcJobSearchDiagnosticHtmlV7501_(items.length);
