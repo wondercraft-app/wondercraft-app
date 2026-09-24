@@ -1,10 +1,10 @@
-/* WC-7.52.5 希望通勤内優先・未経験明示案件検索版 */
+/* WC-7.52.6 未経験要確認を除外する最終防御版 */
 /* WC-7.48.2 ランキング内訳直接受渡し版 */
 /* WonderCraft PWA WC-7.45.0 - サーバー側案件検索・根本高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.5";
+const WC_PWA_BUILD="WC-7.52.6";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.5-commute-priority",
+      "./service-worker.js?v=7.52.6-beginner-strict",
       { updateViaCache:"none" }
     );
 
@@ -4081,6 +4081,20 @@ function wcHolidayMatchesV7514_(job,mode){
   return mode==="weekend_holiday"?weekendHoliday:weekend;
 }
 
+function wcExplicitBeginnerEligibleV7526_(job){
+  const level=String(job?.searchExperienceLevel||"").toLowerCase();
+  if(level==="beginner"||level==="conditional")return true;
+  if(level==="required"||level==="unknown"||level==="preferred")return false;
+
+  const availability=normalizeJobText(job?.beginnerAvailability||"");
+  const original=normalizeJobText(job?.originalText||"");
+  const explicit=/未経験(?:可|可能|歓迎|者歓迎|常勤|案件|ok)|経験不問/.test(original) &&
+    !/未経験(?:不可|ng)|(?:通信|携帯|ショップ)経験必須|経験者のみ/.test(original);
+  if(explicit)return true;
+  return /^(?:可|可能|未経験可|未経験可能|未経験歓迎|ok)$/.test(availability) &&
+    !/経験必須|不可|要確認/.test(normalizeJobText(job?.experienceClass||""));
+}
+
 function renderJobSearchResults(){
   wcFixJobSortLayoutV7490_();
   /* WC-7.47.0: 取得済み候補を総合点順に表示 */
@@ -4197,6 +4211,8 @@ function renderJobSearchResults(){
       // WC-7.51.6: サーバー判定とブラウザ判定の差があっても、
       // 常勤タブにスポットを混ぜない。休日条件も最終防御する。
       if(!modeOk||(!jobSearchDistanceFirst_&&!wcHolidayMatchesV7514_(x,holidayMode))||!commuteOk)return false;
+      if(wcExperienceFilterModeV7430_(beginner)==="beginner" &&
+         !wcExplicitBeginnerEligibleV7526_(x))return false;
       experienceBaseCount++;
       experiencePassedCount++;
       return true;
