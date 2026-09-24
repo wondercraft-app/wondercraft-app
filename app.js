@@ -1,10 +1,10 @@
-/* WC-7.52.2 通勤結果の案件ID紐付け強化版 */
+/* WC-7.52.4 全保有案件から距離先行10件選抜・通勤採点版 */
 /* WC-7.48.2 ランキング内訳直接受渡し版 */
 /* WonderCraft PWA WC-7.45.0 - サーバー側案件検索・根本高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.2";
+const WC_PWA_BUILD="WC-7.52.4";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.2-commute-coordinates",
+      "./service-worker.js?v=7.52.4-distance-first",
       { updateViaCache:"none" }
     );
 
@@ -2644,6 +2644,7 @@ function resetJobSearch(){
   updateJobCategoryUiV7500_();
   jobSearchHistoricalFallback_=false;
   jobSearchServerAuthoritative_=false;
+  jobSearchDistanceFirst_=false;
 
   updateJobPrefectureOptions();
   updateJobRangeLabels();
@@ -2780,11 +2781,15 @@ async function runStationAwareJobSearch_(options={}){
             jobSearchMode==="spot"
               ?"spot"
               :"long",
+          distanceFirst:!!selectedOriginForServer,
+          station:selectedOriginForServer?`${selectedOriginForServer.name}駅`:"",
+          stationData:selectedOriginForServer||null,
+          nearestLimit:10,
           fastSearch:true,
           chunkedSearch:true,
           page:requestedPage,
-          pageSize:selectedOriginForServer?30:40,
-          resultLimit:selectedOriginForServer?30:40
+          pageSize:selectedOriginForServer?10:40,
+          resultLimit:selectedOriginForServer?10:40
         }
       );
 
@@ -2849,6 +2854,7 @@ async function runStationAwareJobSearch_(options={}){
     jobSearchLoaded=true;
     jobSearchHistoricalFallback_=response?.historicalFallback===true;
     jobSearchServerAuthoritative_=true;
+    jobSearchDistanceFirst_=response?.distanceFirst===true;
     jobSearchServerStats_={
       rawSheetJobs:
         response?.rawSheetJobs ?? jobSearchServerStats_.rawSheetJobs,
@@ -2967,7 +2973,7 @@ async function runStationAwareJobSearch_(options={}){
         String(job.rowNumber)
       )
     )
-    .slice(0,8);
+    .slice(0,30); // サーバーが返した現在ページの最大30件を順次確認
   if(!candidates.length)return;
   const batchSize=2,batches=[];
   for(let i=0;i<candidates.length;i+=batchSize)batches.push(candidates.slice(i,i+batchSize));
@@ -3028,7 +3034,7 @@ async function runStationAwareJobSearch_(options={}){
         completed++;
         updateWcLoadingText_?.(`${originDisplay}からの通勤時間を確認中… ${completed}/${batches.length}`);
         // 全件再描画を毎バッチ行わず、2バッチ単位で反映
-        if(completed%2===0||completed===batches.length){jobStationSearchApplied=true;renderJobSearchResults();}
+        jobStationSearchApplied=true;renderJobSearchResults();
       }
     }
   }
@@ -3788,7 +3794,8 @@ function wcSafeJobRankingV7437_(x, commute, preferredMinutes, desiredMin, beginn
     jobTypePoints,
     careerPoints,
     startTimingPoints,
-    commuteMinutes:Number.isFinite(Number(commute))?Number(commute):null,
+    commuteMinutes:commute!==null && commute!==undefined && commute!=="" &&
+      Number.isFinite(Number(commute)) && Number(commute)>0 ? Number(commute) : null,
     jobBusinessTypeLabel:x?.jobBusinessTypeLabel||""
   };
 }
@@ -4189,7 +4196,7 @@ function renderJobSearchResults(){
     if(jobSearchServerAuthoritative_){
       // WC-7.51.6: サーバー判定とブラウザ判定の差があっても、
       // 常勤タブにスポットを混ぜない。休日条件も最終防御する。
-      if(!modeOk||!wcHolidayMatchesV7514_(x,holidayMode)||!commuteOk)return false;
+      if(!modeOk||(!jobSearchDistanceFirst_&&!wcHolidayMatchesV7514_(x,holidayMode))||!commuteOk)return false;
       experienceBaseCount++;
       experiencePassedCount++;
       return true;
@@ -4398,6 +4405,7 @@ function renderJobSearchResults(){
 let jobSearchMode="long";
 let jobSearchCurrentItems=[];
 let jobStationCommuteMap={};
+let jobSearchDistanceFirst_=false;
 let jobStationSearchApplied=false;
 let wcCommuteDiagV7521_={requested:0,returned:0,measured:0,failed:0};
 let jobStationSearchOrigin="";
