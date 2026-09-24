@@ -1,4 +1,4 @@
-/* WC-7.52.2 通勤実測結果ID同期・表示反映修正版 */
+/* WC-7.52.2 通勤結果の案件ID紐付け強化版 */
 /* WC-7.48.2 ランキング内訳直接受渡し版 */
 /* WonderCraft PWA WC-7.45.0 - サーバー側案件検索・根本高速化版 */
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.2-commute-result-sync",
+      "./service-worker.js?v=7.52.2-commute-coordinates",
       { updateViaCache:"none" }
     );
 
@@ -2957,7 +2957,7 @@ async function runStationAwareJobSearch_(options={}){
    * GAS/NAVITIMEの同時実行を避け、タイムアウトを防ぐ。
    */
   (jobSearchItems||[]).forEach((job,index)=>{
-    if(!job.__wcCommuteId) job.__wcCommuteId=`WC7522-${Number(job.rowNumber||0)}-${String(job.shopName||"").normalize("NFKC").replace(/\s+/g,"").slice(0,24)}`;
+    if(!job.__wcCommuteId) job.__wcCommuteId=`WC7521-${Number(job.rowNumber||0)}-${index}`;
   });
   const candidates=(jobSearchItems||[])
     .filter(job=>
@@ -3001,28 +3001,14 @@ async function runStationAwareJobSearch_(options={}){
         const rows=Array.isArray(result?.results)?result.results:[];
         wcCommuteDiagV7521_.returned+=rows.length;
         rows.forEach(row=>{
-          const normalizedRow={...row};
-          if(normalizedRow.minutes!==null && normalizedRow.minutes!==undefined && normalizedRow.minutes!==""){
-            const n=Number(normalizedRow.minutes);
-            normalizedRow.minutes=Number.isFinite(n)&&n>0?n:null;
-          }else{
-            normalizedRow.minutes=null;
-          }
-          jobStationCommuteMap[String(normalizedRow.rowNumber)]=normalizedRow;
-          if(normalizedRow.clientCommuteId){
-            jobStationCommuteMap[String(normalizedRow.clientCommuteId)]=normalizedRow;
-          }
           const target=(jobSearchItems||[]).find(job=>
-            (normalizedRow.clientCommuteId && normalizedRow.clientCommuteId===job.__wcCommuteId) ||
-            Number(job.rowNumber)===Number(normalizedRow.rowNumber)
+            (row.clientCommuteId && row.clientCommuteId===job.__wcCommuteId) ||
+            Number(job.rowNumber)===Number(row.rowNumber)
           );
           if(target){
-            target.__wcCommute=normalizedRow;
-            if(normalizedRow.ok===true && normalizedRow.minutes!==null){
-              target.commuteMinutes=normalizedRow.minutes;
-            }
+            target.__wcCommute=row;
+            jobStationCommuteMap[String(target.rowNumber)]=row;
           }
-          row=normalizedRow;
           const measured=row?.ok && row.minutes!==null && row.minutes!==undefined &&
             row.minutes!=="" && Number.isFinite(Number(row.minutes));
           if(measured){successCount++;wcCommuteDiagV7521_.measured++;}
@@ -3869,15 +3855,11 @@ function wcRankingBreakdownHtml_(job, safeRanking){
   const career=wcRankingNum_(ranking.careerPoints ?? job.careerPoints);
   const start=wcRankingNum_(ranking.startTimingPoints ?? job.startTimingPoints);
 
-  const commuteRaw=ranking.commuteMinutes ?? job?.__wcCommute?.minutes ?? job.commuteMinutes;
-  const commuteMinutes=
-    commuteRaw!==null && commuteRaw!==undefined && commuteRaw!=="" &&
-    Number.isFinite(Number(commuteRaw)) && Number(commuteRaw)>0
-      ? Number(commuteRaw)
-      : null;
-  const commuteDetail=commuteMinutes!==null
-    ? `（${esc(String(commuteMinutes))}分）`
-    : "（未計測）";
+  const commuteMinutes=ranking.commuteMinutes ?? job.commuteMinutes;
+  const commuteDetail=
+    commuteMinutes
+      ? `（${esc(String(commuteMinutes))}分）`
+      : "";
 
   const typeLabel=ranking.jobBusinessTypeLabel||job.jobBusinessTypeLabel||"";
   const typeDetail=
@@ -3948,7 +3930,6 @@ function wcJobSearchDiagnosticHtmlV7501_(visibleCount){
     parts.push(`読み込み済み ${Number(jobSearchItems?.length||0).toLocaleString("ja-JP")}件`);
   }
   if(jobStationSearchOrigin){
-    parts.push(`${WC_PWA_BUILD}`);
     parts.push(`通勤実測 ${verifiedCommutes.toLocaleString("ja-JP")}件`);
     if(verifiedCommutes>0)parts.push(`希望時間内 ${withinPreferred.toLocaleString("ja-JP")}件`);
   }
@@ -4016,7 +3997,7 @@ function wcSpotPriceDisplayV7510_(value){
 }
 
 function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
-  const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.__wcCommuteId||"")]||jobStationCommuteMap[String(x.rowNumber)]||null;
+  const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.rowNumber)]||null;
   const commute=originStation
     ? getValidJobCommuteMinutes_(routeInfo)
     : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4126,7 +4107,7 @@ function renderJobSearchResults(){
     x=wcPrepareJobSearchItem_(x);
     const text=x.__wcSearchText;
     const pay=x.__wcPay;
-    const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.__wcCommuteId||"")]||jobStationCommuteMap[String(x.rowNumber)]||null;
+    const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4249,7 +4230,7 @@ function renderJobSearchResults(){
    */
   items=items.map(x=>{
     const prepared=wcPrepareJobSearchItem_(x);
-    const routeInfo=prepared.__wcCommute||jobStationCommuteMap[String(prepared.__wcCommuteId||"")]||jobStationCommuteMap[String(prepared.rowNumber)]||null;
+    const routeInfo=prepared.__wcCommute||jobStationCommuteMap[String(prepared.rowNumber)]||null;
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(prepared));return Number.isFinite(m)&&m>0?m:null;})();
@@ -4356,7 +4337,7 @@ function renderJobSearchResults(){
       return wcSpotCardHtmlV7510_(x,originStation,maxMinutes);
     }
 
-    const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.__wcCommuteId||"")]||jobStationCommuteMap[String(x.rowNumber)]||null;
+    const routeInfo=x.__wcCommute||jobStationCommuteMap[String(x.rowNumber)]||null;
     const commute=originStation
       ? getValidJobCommuteMinutes_(routeInfo)
       : (()=>{const m=Number(getJobCommuteMinutes_(x));return Number.isFinite(m)&&m>0?m:null;})();
