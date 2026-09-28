@@ -168,6 +168,13 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   height:20px;
   margin:0;
 }
+.job-venue-filter{margin:0;padding:12px;border:1px solid var(--border);border-radius:12px}
+.job-venue-filter legend{padding:0 5px;font-size:14px;font-weight:800;color:var(--navy)}
+.job-venue-options{display:flex;flex-wrap:wrap;gap:8px}
+.job-venue-options label{display:inline-flex!important;align-items:center;gap:7px;padding:8px 11px;border:1px solid #cbd7e6;border-radius:10px;background:#fff;color:var(--text);font-size:14px;font-weight:700;cursor:pointer}
+.job-venue-options label:has(input:checked){border-color:var(--blue);background:var(--soft);color:var(--navy)}
+.job-venue-options input{width:19px;height:19px;min-height:19px;margin:0;accent-color:var(--blue)}
+.job-venue-filter small{display:block;margin-top:8px;color:var(--muted);font-size:12px;line-height:1.5}
 .home-notice-only{
   padding-top:0!important;
 }
@@ -523,6 +530,15 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
                 <option value="office">事務</option>
               </select>
             </label>
+            <fieldset class="job-venue-filter">
+              <legend>勤務先タイプ（複数選択可）</legend>
+              <div class="job-venue-options">
+                <label><input id="jobVenueRetail" type="checkbox" value="retail">量販店</label>
+                <label><input id="jobVenueShop" type="checkbox" value="shop">ショップ</label>
+                <label><input id="jobVenueEvent" type="checkbox" value="event">イベント</label>
+              </div>
+              <small>未選択ならすべて表示。選んだら「この条件で検索する」を押してください。</small>
+            </fieldset>
             <label>リモート案件
               <select id="jobRemoteFilter">
                 <option value="exclude" selected>リモート含まない</option>
@@ -749,7 +765,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 
   <script src="./config.js?v=7.52.6-beginner-strict"></script>
   <script src="./stations-data.js?v=7.52.6-beginner-strict"></script>
-  <script src="./app.js?v=7.52.6-beginner-strict"></script>
+  <script src="./app.js?v=7.52.7-venue-checks"></script>
 
 </body>
 </html>

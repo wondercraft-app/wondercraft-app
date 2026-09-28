@@ -4,7 +4,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.6";
+const WC_PWA_BUILD="WC-7.52.7";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.6-beginner-strict",
+      "./service-worker.js?v=7.52.7-venue-checks",
       { updateViaCache:"none" }
     );
 
@@ -2274,6 +2274,28 @@ function resolveOriginStationSelection_(){
   return null;
 }
 
+function wcSelectedJobVenuesV7527_(){
+  return ["jobVenueRetail","jobVenueShop","jobVenueEvent"]
+    .map(id=>$(id))
+    .filter(input=>input?.checked)
+    .map(input=>input.value);
+}
+
+function wcJobVenueTypesV7527_(job){
+  const title=String(job?.shopName||job?.normalizedShop||"").normalize("NFKC").toLowerCase();
+  const structured=String(job?.structuredJobType||"").normalize("NFKC").toLowerCase();
+  const original=String(job?.originalText||"").slice(0,2400).normalize("NFKC").toLowerCase();
+  const work=(original.match(/(?:稼働店舗|配置店舗|勤務地|勤務先|稼働場所|勤務場所|店舗|現場)\s*[:：]?\s*[^/。\n]{1,90}/g)||[]).slice(0,5).join(" ");
+  const primary=title+" "+structured+" "+work;
+  const types=[];
+  if(/イベント|催事|特販|プロモーション|キャンペーン|抽選会|ポップアップ/.test(primary)||
+     /(?:イベント|催事)(?:案件|販売|スタッフ|稼働|会場|運営)/.test(original))types.push("event");
+  if(/家電量販|量販店|エディオン|ヤマダ(?:電機|デンキ|電器)|ケーズデンキ|ビックカメラ|ヨドバシ|ノジマ|ジョーシン|joshin|コジマ|ベスト電器|100満ボルト|pcデポ/.test(primary))types.push("retail");
+  if(/ショップ|au\s*style|ドコモショップ|ソフトバンク[^\s/]{0,14}店|楽天モバイル[^\s/]{0,14}店|ワイモバイル[^\s/]{0,14}店|\bds[^\s/]{0,14}/.test(primary)||
+     /^(?:ソフトバンク|sb)(?!.*(?:特販|イベント|催事|トップガン|ラウンダー))/.test(title))types.push("shop");
+  return types;
+}
+
 function wcPrepareJobSearchItem_(x){
   if(!x)return x;
   if(x.__wcPrepared && x.__wcPreparedBuild===WC_PWA_BUILD)return x;
@@ -2313,6 +2335,9 @@ function wcPrepareJobSearchItem_(x){
   x.__wcTravel=isTravelJob_(x);
   x.__wcJobDate=getJobDate_(x);
   x.__wcBeginnerStatus=wcInferBeginnerStatusV7423_(x);
+  x.__wcVenueTypes=Array.isArray(x.venueTypes)
+    ?x.venueTypes
+    :wcJobVenueTypesV7527_(x);
   x.__wcPreparedBuild=WC_PWA_BUILD;
   x.__wcPrepared=true;
   return x;
@@ -2636,6 +2661,9 @@ function resetJobSearch(){
   jobStationApiUnavailable=false;
   setJobPayUnit_("daily");
   if($("jobTravelFilter"))$("jobTravelFilter").checked=false;
+  ["jobVenueRetail","jobVenueShop","jobVenueEvent"].forEach(id=>{
+    if($(id))$(id).checked=false;
+  });
   if($("jobRemoteFilter"))$("jobRemoteFilter").value="exclude";
   if($("jobHolidayFilter"))$("jobHolidayFilter").value="";
   if($("jobSpotDateFrom"))$("jobSpotDateFrom").value="";
@@ -2731,6 +2759,7 @@ async function runStationAwareJobSearch_(options={}){
 
   const company=$("jobCompanyFilter")?.value||"";
   const jobCategory=$("jobCategoryFilter")?.value||"";
+  const venueTypes=wcSelectedJobVenuesV7527_();
   const telecomConditionsEnabled=!jobCategory||jobCategory==="communication";
   const career=telecomConditionsEnabled?($("jobCareerFilter")?.value||""):"";
   const experience=telecomConditionsEnabled?($("jobBeginnerFilter")?.value||""):"";
@@ -2769,6 +2798,7 @@ async function runStationAwareJobSearch_(options={}){
           area,
           company,
           jobCategory,
+          venueTypes,
           career,
           experience,
           keyword,
@@ -4108,6 +4138,7 @@ function renderJobSearchResults(){
   const company=$("jobCompanyFilter")?.value||"";
   const career=$("jobCareerFilter")?.value||"";
   const beginner=$("jobBeginnerFilter")?.value||"";
+  const venueTypes=wcSelectedJobVenuesV7527_();
   const qTokens=wcKeywordTokens_($("jobKeywordFilter")?.value||"");
   const min=Number($("jobPayMin")?.value||(jobPayUnit==="hourly"?1000:10000));
   const max=Number($("jobPayMax")?.value||(jobPayUnit==="hourly"?5000:50000));
@@ -4139,6 +4170,7 @@ function renderJobSearchResults(){
     const jobDate=x.__wcJobDate;
 
     const modeOk=jobSearchMode==="spot"?spot:!spot;
+    const venueOk=!venueTypes.length||venueTypes.some(type=>x.__wcVenueTypes?.includes(type));
     const remoteOk=remoteMode==="include"||(remoteMode==="only"?remote:!remote);
     const spotDateOk=jobSearchMode!=="spot"||((!dateFrom||!jobDate||jobDate>=dateFrom)&&(!dateTo||!jobDate||jobDate<=dateTo));
     const regionOk=!region||jobRegion===region;
@@ -4210,7 +4242,7 @@ function renderJobSearchResults(){
     if(jobSearchServerAuthoritative_){
       // WC-7.51.6: サーバー判定とブラウザ判定の差があっても、
       // 常勤タブにスポットを混ぜない。休日条件も最終防御する。
-      if(!modeOk||(!jobSearchDistanceFirst_&&!wcHolidayMatchesV7514_(x,holidayMode))||!commuteOk)return false;
+      if(!modeOk||!venueOk||(!jobSearchDistanceFirst_&&!wcHolidayMatchesV7514_(x,holidayMode))||!commuteOk)return false;
       if(wcExperienceFilterModeV7430_(beginner)==="beginner" &&
          !wcExplicitBeginnerEligibleV7526_(x))return false;
       experienceBaseCount++;
@@ -4219,7 +4251,7 @@ function renderJobSearchResults(){
     }
 
     const beforeExperience=
-      modeOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&wcHolidayMatchesV7514_(x,holidayMode)&&commuteOk&&payOk&&
+      modeOk&&venueOk&&remoteOk&&spotDateOk&&regionOk&&areaOk&&travelOk&&wcHolidayMatchesV7514_(x,holidayMode)&&commuteOk&&payOk&&
       (!company||x.sourceCompany===company)&&
       (!career||x.__wcCareer===career)&&
       (!qTokens.length||qTokens.every(token=>text.includes(token)));
