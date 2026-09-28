@@ -413,22 +413,79 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   </style>
 
   <style>
-/* PCの下部メニューを中央に収める。スマートフォンは従来の全幅表示。 */
+/* PCの下部バーは画面下端に固定し、5ボタンだけを中央に配置する。 */
 @media(min-width:900px){
   .bottom-nav.five-nav{
-    left:50% !important;
-    right:auto !important;
-    bottom:14px !important;
-    width:min(900px,calc(100vw - 40px)) !important;
-    max-width:900px !important;
-    transform:translateX(-50%) !important;
-    grid-template-columns:repeat(5,minmax(0,1fr)) !important;
-    padding:7px !important;
-    border:1px solid var(--border) !important;
-    border-radius:18px !important;
-    box-shadow:0 8px 30px #102a4930 !important;
+    position:fixed !important;
+    left:0 !important;
+    right:0 !important;
+    bottom:0 !important;
+    width:100% !important;
+    max-width:none !important;
+    margin:0 !important;
+    transform:none !important;
+    display:grid !important;
+    grid-template-columns:repeat(5,minmax(0,160px)) !important;
+    justify-content:center !important;
+    padding:6px 12px 8px !important;
+    border:0 !important;
+    border-top:1px solid var(--border) !important;
+    border-radius:0 !important;
+    box-shadow:0 -4px 18px #102a4914 !important;
   }
-  .bottom-nav.five-nav button{min-width:0;min-height:64px;}
+  .bottom-nav.five-nav button{
+    min-width:0;
+    min-height:62px;
+  }
+}
+  </style>
+  <style>
+/* 関連する通勤条件を一組にし、PCでも上から順に読める配置にする。 */
+#jobSearchSection .job-filter-panel .job-commute-group{
+  grid-column:span 2 !important;
+  display:grid !important;
+  grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr) !important;
+  gap:14px !important;
+  min-width:0 !important;
+  width:100% !important;
+  align-items:stretch !important;
+}
+#jobSearchSection .job-commute-group > label{
+  min-width:0 !important;
+  width:100% !important;
+  margin:0 !important;
+}
+#jobSearchSection .job-filter-panel > .job-check-row{
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:center !important;
+  align-self:end !important;
+  gap:12px !important;
+  min-width:0 !important;
+  min-height:70px !important;
+  padding:12px 16px !important;
+}
+#jobSearchSection .job-filter-panel > .job-check-row input{
+  display:block !important;
+  width:20px !important;
+  height:20px !important;
+  min-height:20px !important;
+  flex:0 0 20px !important;
+  margin:0 !important;
+}
+#jobSearchSection .job-filter-panel > .job-check-row span{
+  display:inline !important;
+  width:auto !important;
+  min-width:0 !important;
+}
+#jobSearchSection .job-filter-panel > label:has(#jobKeywordFilter){
+  grid-column:1 / -1 !important;
+}
+@media(max-width:899px){
+  #jobSearchSection .job-filter-panel .job-commute-group{
+    grid-column:1 / -1 !important;
+    grid-template-columns:1fr !important;
+  }
 }
   </style>
 </head>
@@ -444,7 +501,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.52.9</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.52.11</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -626,6 +683,11 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
                 <option value="weekend_holiday">土日祝休み</option>
               </select>
             </label>
+            <label class="job-check-row">
+              <input id="jobTravelFilter" type="checkbox">
+              <span>出張あり案件も表示する</span>
+            </label>
+            <div class="job-commute-group">
             <label class="job-origin-station-field">起点駅
               <div class="station-autocomplete">
                 <input id="jobOriginStation" type="search" inputmode="search"
@@ -640,10 +702,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
               <span><strong id="jobOriginStationLabel">起点駅</strong>から片道 <strong id="jobDistanceValue">指定なし</strong></span>
               <input id="jobDistanceRange" type="range" min="10" max="120" step="10" value="60">
             </label>
-            <label class="job-check-row">
-              <input id="jobTravelFilter" type="checkbox">
-              <span>出張あり案件も表示する</span>
-            </label>
+            </div>
             <div class="job-pay-filter">
               <div class="job-pay-heading">
                 <span>希望単価</span>
@@ -838,7 +897,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 
   <script src="./config.js?v=7.52.6-beginner-strict"></script>
   <script src="./stations-data.js?v=7.52.6-beginner-strict"></script>
-  <script src="./app.js?v=7.52.9-desktop-nav"></script>
+  <script src="./app.js?v=7.52.11-filter-layout"></script>
 
 </body>
 </html>
