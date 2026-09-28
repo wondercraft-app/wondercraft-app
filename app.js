@@ -4,7 +4,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.8";
+const WC_PWA_BUILD="WC-7.52.9";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.8-venue-layout",
+      "./service-worker.js?v=7.52.9-desktop-nav",
       { updateViaCache:"none" }
     );
 
