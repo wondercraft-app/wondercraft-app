@@ -442,7 +442,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   <style>
 /* 関連する通勤条件を一組にし、PCでも上から順に読める配置にする。 */
 #jobSearchSection .job-filter-panel .job-commute-group{
-  grid-column:span 2 !important;
+  grid-column:span 4 !important;
   display:grid !important;
   grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr) !important;
   gap:14px !important;
@@ -488,6 +488,58 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   }
 }
   </style>
+
+  <style>
+#jobSearchSection .job-filter-panel{
+  display:grid !important;
+  grid-template-columns:repeat(6,minmax(0,1fr)) !important;
+  gap:18px !important;
+  align-items:start !important;
+}
+#jobSearchSection .job-filter-panel > label,
+#jobSearchSection .job-filter-panel > .job-pay-filter,
+#jobSearchSection .job-filter-panel > .spot-only-filter{
+  grid-column:span 2 !important;
+  min-width:0 !important;
+  width:100% !important;
+  margin:0 !important;
+}
+#jobSearchSection .job-filter-title,
+#jobSearchSection .job-venue-filter,
+#jobSearchSection .job-filter-panel > label:has(#jobKeywordFilter),
+#jobSearchSection #runJobSearchBtn{grid-column:1 / -1 !important;}
+#jobSearchSection .job-commute-group > label{
+  grid-column:auto !important;
+  align-self:start !important;
+}
+#jobSearchSection .job-filter-panel > .job-pay-filter{align-self:start !important;}
+#jobSearchSection .job-commute-group small{overflow-wrap:anywhere;white-space:normal;}
+#jobSearchSection .job-result-card:has(> .wc-ranking-box){
+  display:grid !important;
+  grid-template-columns:280px minmax(0,1fr) !important;
+  gap:18px !important;
+  align-items:start !important;
+}
+#jobSearchSection .job-result-card > .wc-ranking-box{
+  grid-column:1 !important;
+  min-width:0 !important;
+  width:100% !important;
+  margin:0 !important;
+}
+#jobSearchSection .job-result-card > .job-card-main{
+  grid-column:2 !important;
+  min-width:0 !important;
+}
+#jobSearchSection .job-result-card > .job-card-details{grid-column:1 / -1 !important;}
+#jobSearchSection .wc-ranking-box span{min-width:0;overflow-wrap:anywhere;}
+#jobSearchSection .wc-ranking-box strong{white-space:nowrap;}
+@media(max-width:899px){
+  #jobSearchSection .job-filter-panel{grid-template-columns:repeat(2,minmax(0,1fr)) !important;}
+  #jobSearchSection .job-filter-panel .job-commute-group{grid-column:1 / -1 !important;grid-template-columns:1fr !important;}
+  #jobSearchSection .job-result-card:has(> .wc-ranking-box){grid-template-columns:minmax(0,1fr) !important;}
+  #jobSearchSection .job-result-card > .job-card-main{grid-column:1 !important;}
+}
+  </style>
 </head>
 <body>
   <div id="splash" class="splash" aria-hidden="true">
@@ -501,7 +553,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.52.11</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.52.13</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -897,7 +949,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 
   <script src="./config.js?v=7.52.6-beginner-strict"></script>
   <script src="./stations-data.js?v=7.52.6-beginner-strict"></script>
-  <script src="./app.js?v=7.52.11-filter-layout"></script>
+  <script src="./app.js?v=7.52.13-region-layout"></script>
 
 </body>
 </html>

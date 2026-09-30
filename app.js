@@ -4,7 +4,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.11";
+const WC_PWA_BUILD="WC-7.52.13";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.11-filter-layout",
+      "./service-worker.js?v=7.52.13-region-layout",
       { updateViaCache:"none" }
     );
 
@@ -2171,8 +2171,13 @@ function findStationCandidates_(query){
     else if(name.startsWith(q))starts.push(station);
     else if(name.includes(q)||address.includes(q)||prefecture.includes(q))includes.push(station);
   }
+  const region=$("jobRegionFilter")?.value||"";
+  const area=$("jobAreaFilter")?.value||"";
+  const preference=station=>area&&area!==region&&station.p===area?2:
+    (WC_JOB_REGION_MAP[region]||[]).includes(station.p)?1:0;
+  const preferred=list=>list.sort((a,b)=>preference(b)-preference(a));
   const out=[],seen=new Set();
-  for(const station of [...exact,...starts,...includes]){
+  for(const station of [...preferred(exact),...preferred(starts),...preferred(includes)]){
     const key=`${station.i}:${station.n}:${station.p}`;
     if(seen.has(key))continue;
     seen.add(key);
@@ -3871,7 +3876,7 @@ function wcRankingBreakdownHtmlV7490_(safeRanking){
         <strong style="font-size:22px;">${score}点</strong>
         <span style="font-weight:700;">${esc(wcRankingLabel_(score))}</span>
       </div>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:5px 12px;font-size:13px;">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;font-size:13px;">
         <span>🚃 通勤${commuteMinutes!==null?`（${commuteMinutes}分）`:"（未計測）"}</span><strong>${commute}/35</strong>
         <span>💰 単価</span><strong>${price}/35</strong>
         <span>🏬 案件タイプ</span><strong>${type}/15</strong>
@@ -3910,7 +3915,7 @@ function wcRankingBreakdownHtml_(job, safeRanking){
         <strong style="font-size:22px;">${score}点</strong>
         <span style="font-weight:700;">${esc(wcRankingLabel_(score))}</span>
       </div>
-      <div style="display:grid;grid-template-columns:1fr auto;gap:5px 12px;font-size:13px;">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;font-size:13px;">
         <span>🚃 通勤 ${commuteDetail}</span><strong>${commute}/35</strong>
         <span>💰 単価</span><strong>${price}/35</strong>
         <span>🏬 案件タイプ ${typeDetail}</span><strong>${type}/15</strong>
@@ -4242,7 +4247,7 @@ function renderJobSearchResults(){
     if(jobSearchServerAuthoritative_){
       // WC-7.51.6: サーバー判定とブラウザ判定の差があっても、
       // 常勤タブにスポットを混ぜない。休日条件も最終防御する。
-      if(!modeOk||!venueOk||(!jobSearchDistanceFirst_&&!wcHolidayMatchesV7514_(x,holidayMode))||!commuteOk)return false;
+      if(!modeOk||!venueOk||!regionOk||!areaOk||(!jobSearchDistanceFirst_&&!wcHolidayMatchesV7514_(x,holidayMode))||!commuteOk)return false;
       if(wcExperienceFilterModeV7430_(beginner)==="beginner" &&
          !wcExplicitBeginnerEligibleV7526_(x))return false;
       experienceBaseCount++;
