@@ -4,7 +4,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.13";
+const WC_PWA_BUILD="WC-7.52.14";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.13-region-layout",
+      "./service-worker.js?v=7.52.14-station-basis",
       { updateViaCache:"none" }
     );
 
@@ -4050,7 +4050,7 @@ function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
   const price=wcSpotPriceDisplayV7510_(x.price);
 
   const commuteHtml=commute!==null
-    ? `<span class="${commute<=maxMinutes?'job-commute-ok':'job-commute-over'}">🚃 約${commute}分${commute<=maxMinutes?'':'（希望時間超）'}</span>`
+    ? `<span class="${commute<=maxMinutes?'job-commute-ok':'job-commute-over'}">🚃 約${commute}分${/^駅基準：/.test(String(routeInfo?.coordinateSource||''))?'（'+esc(routeInfo.coordinateSource.slice(4))+'まで）':''}${commute<=maxMinutes?'':'（希望時間超）'}</span>`
     : (originStation
         ? `<span class="job-commute-pending">🚃 通勤要確認</span>`
         : "");
@@ -4432,7 +4432,7 @@ function renderJobSearchResults(){
           <span>📍 ${esc(x.prefecture||x.area||"勤務地要確認")}</span>
           ${date?`<span>📅 ${esc(date)}</span>`:""}
           ${commute!==null
-            ? `<span class="${commute<=maxMinutes?'job-commute-ok':'job-commute-over'}">🚃 約${commute}分${commute<=maxMinutes?'':'（希望時間超）'}</span>`
+            ? `<span class="${commute<=maxMinutes?'job-commute-ok':'job-commute-over'}">🚃 約${commute}分${/^駅基準：/.test(String(routeInfo?.coordinateSource||''))?'（'+esc(routeInfo.coordinateSource.slice(4))+'まで）':''}${commute<=maxMinutes?'':'（希望時間超）'}</span>`
             : (originStation
                 ? `<span class="job-commute-pending">🚃 通勤要確認</span>`
                 : "")}
