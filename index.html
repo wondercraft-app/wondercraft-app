@@ -410,6 +410,11 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
   margin-top:9px;
   line-height:1.5;
 }
+  /* WC-7.52.15 長い単価・案件名でもカード幅を越えない */
+  #jobSearchSection .job-card-meta{min-width:0;flex-wrap:wrap;}
+  #jobSearchSection .job-card-meta > span{max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;}
+  #jobSearchSection .job-card-title-row h3{min-width:0;overflow-wrap:anywhere;}
+  #jobSearchSection .spot-job-result-card .spot-job-price{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;}
   </style>
 
   <style>
@@ -553,7 +558,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
       <img class="wc-company-logo" src="./assets/header-logo.png" alt="WonderCraft">
       <div class="wc-brand-copy">
         <strong class="wc-brand-name">WonderCraft</strong>
-        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.52.14</span></div>
+        <div class="wc-brand-sub"><span>人材管理</span><span id="appVersion" class="app-version">WC-7.52.15</span></div>
       </div>
     </div>
     <div class="top-actions">
@@ -949,7 +954,7 @@ body[data-role="partner"] .topbar .brand strong:after{content:"Partner Portal";f
 
   <script src="./config.js?v=7.52.6-beginner-strict"></script>
   <script src="./stations-data.js?v=7.52.6-beginner-strict"></script>
-  <script src="./app.js?v=7.52.14-station-basis"></script>
+  <script src="./app.js?v=7.52.15-price-clean"></script>
 
 </body>
 </html>

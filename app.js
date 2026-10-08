@@ -4,7 +4,7 @@
 const state={view:"home",candidates:[],progress:[],today:[],progressStatuses:[],selected:null,runtimeConfig:{},user:null};
 const $=id=>document.getElementById(id);
 const config=window.WONDERCRAFT_CONFIG||{};
-const WC_PWA_BUILD="WC-7.52.14";
+const WC_PWA_BUILD="WC-7.52.15";
 let debounceTimer;
 let loadRequestId=0;
 
@@ -318,7 +318,7 @@ async function registerWonderCraftServiceWorker_(){
 
   try{
     const reg = await navigator.serviceWorker.register(
-      "./service-worker.js?v=7.52.14-station-basis",
+      "./service-worker.js?v=7.52.15-price-clean",
       { updateViaCache:"none" }
     );
 
@@ -2053,13 +2053,8 @@ let jobSearchServerStats_={
 const WC_JOB_SEARCH_PAGE_SIZE_=50;
 function normalizeJobText(v){return String(v||"").normalize("NFKC").toLowerCase();}
 function extractJobDailyPay(v){
-  const text=String(v||"").normalize("NFKC").replace(/,/g,"");
-  const nums=(text.match(/\d{3,7}/g)||[]).map(Number);
-  if(!nums.length)return 0;
-  let n=Math.max(...nums);
-  if(/時給|\/h|hour/i.test(text)||n<=5000)return Math.round(n*8);
-  if(/月給|月額|万円/.test(text)||n>=100000)return Math.round(n/20);
-  return n;
+  const pay=wcJobPayAmountsV75215_(v);
+  return pay.kind==='monthly'?Math.round(pay.amount/20):pay.kind==='hourly'?Math.round(pay.amount*8):pay.amount;
 }
 function extractJobHourlyPay(v){
   const daily=extractJobDailyPay(v);
@@ -2069,11 +2064,10 @@ function extractJobPay(v){
   return jobPayUnit==="hourly"?extractJobHourlyPay(v):extractJobDailyPay(v);
 }
 function formatJobConvertedPay_(v){
-  const amount=extractJobPay(v);
-  if(!amount)return "";
-  return jobPayUnit==="hourly"
-    ? `時給換算 約${amount.toLocaleString()}円`
-    : `日当換算 約${amount.toLocaleString()}円`;
+  const pay=wcJobPayAmountsV75215_(v), amount=extractJobPay(v);
+  if(!amount)return '';
+  const basis=pay.kind==='monthly'?'（月20日換算）':pay.kind==='hourly'&&jobPayUnit!=='hourly'?'（1日8時間換算）':'';
+  return (jobPayUnit==='hourly'?'時給換算 約':'日当換算 約')+amount.toLocaleString()+'円'+basis;
 }
 function setJobPayUnit_(unit){
   jobPayUnit=unit==="hourly"?"hourly":"daily";
@@ -2769,8 +2763,9 @@ async function runStationAwareJobSearch_(options={}){
   const career=telecomConditionsEnabled?($("jobCareerFilter")?.value||""):"";
   const experience=telecomConditionsEnabled?($("jobBeginnerFilter")?.value||""):"";
   const keyword=$("jobKeywordFilter")?.value||"";
-  const payMin=Number($("jobPayMin")?.value||0);
-  const payMax=Number($("jobPayMax")?.value||0);
+  const requestedPay=wcJobPayRangeV75215_();
+  const payMin=requestedPay.min;
+  const payMax=requestedPay.max;
   const includeTravel=$("jobTravelFilter")?.checked===true;
   const remoteMode=$("jobRemoteFilter")?.value||"exclude";
   const holidayMode=$("jobHolidayFilter")?.value||"";
@@ -4047,7 +4042,7 @@ function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
   const date=wcSpotScheduleDisplayV7512_(x);
   const remote=isRemoteJob_(x);
   const travel=isTravelJob_(x);
-  const price=wcSpotPriceDisplayV7510_(x.price);
+  const price=wcJobPriceDisplayV75215_(x.price);
 
   const commuteHtml=commute!==null
     ? `<span class="${commute<=maxMinutes?'job-commute-ok':'job-commute-over'}">🚃 約${commute}分${/^駅基準：/.test(String(routeInfo?.coordinateSource||''))?'（'+esc(routeInfo.coordinateSource.slice(4))+'まで）':''}${commute<=maxMinutes?'':'（希望時間超）'}</span>`
@@ -4092,7 +4087,7 @@ function wcSpotCardHtmlV7510_(x,originStation,maxMinutes){
 
     <details class="job-card-details">
       <summary>詳細を見る</summary>
-      <div class="remarks">${esc(x.originalText||x.remarks||"詳細情報はありません。")}</div>
+      <div class="remarks">${esc(wcJobDetailTextV75215_(x))}</div>
     </details>
   </article>`;
 }
@@ -4145,8 +4140,9 @@ function renderJobSearchResults(){
   const beginner=$("jobBeginnerFilter")?.value||"";
   const venueTypes=wcSelectedJobVenuesV7527_();
   const qTokens=wcKeywordTokens_($("jobKeywordFilter")?.value||"");
-  const min=Number($("jobPayMin")?.value||(jobPayUnit==="hourly"?1000:10000));
-  const max=Number($("jobPayMax")?.value||(jobPayUnit==="hourly"?5000:50000));
+  const requestedPay=wcJobPayRangeV75215_();
+  const min=requestedPay.min;
+  const max=requestedPay.max;
   const maxMinutes=Number($("jobDistanceRange")?.value||60);
   const originStation=jobOriginStationSelection
     ? `${jobOriginStationSelection.name}駅`
@@ -4436,7 +4432,7 @@ function renderJobSearchResults(){
             : (originStation
                 ? `<span class="job-commute-pending">🚃 通勤要確認</span>`
                 : "")}
-          <span>💴 ${esc(x.price||"単価要確認")}</span>
+          <span>💴 ${esc(wcJobPriceDisplayV75215_(x.price))}</span>
           ${formatJobConvertedPay_(x.price)?`<span class="job-pay-converted">${esc(formatJobConvertedPay_(x.price))}</span>`:""}
           <span>⭐ おすすめ ${Number(x.__wcSafeRanking?.score||0)}点</span>
         </div>
@@ -4448,7 +4444,7 @@ function renderJobSearchResults(){
           ${x.beginnerAvailability?`<span class="job-mini-tag">未経験:${esc(x.beginnerAvailability)}</span>`:""}
         </div>
       </div>
-      <details class="job-card-details"><summary>詳細を見る</summary><div class="remarks">${esc(x.originalText||x.remarks||"詳細情報はありません。")}</div></details>
+      <details class="job-card-details"><summary>詳細を見る</summary><div class="remarks">${esc(wcJobDetailTextV75215_(x))}</div></details>
     </article>`;
   }).join("");
 
@@ -4978,4 +4974,49 @@ function testSafeJobRankingV7437_(){
 
   console.log("testSafeJobRankingV7437_",output);
   return output;
+}
+
+/* WC-7.52.15: 単価欄の本文混入をカード表示から分離。原文は詳細へ保持。 */
+function wcJobPriceClauseV75215_(value){
+  const raw=String(value||'').normalize('NFKC').trim();
+  return raw.split(/\n|\s*[/／]\s*(?![日時月](?:\s|[(（]|$)|h(?:\s|$)|hour\b)|(?:募集店舗|勤務地|仕事内容|応募条件|勤務時間|募集条件)\s*[:：]?/i)[0].trim();
+}
+function wcJobPriceDisplayV75215_(value){
+  const clause=wcJobPriceClauseV75215_(value);
+  if(!clause)return '単価要確認';
+  if(!/\d/.test(clause))return /相談/.test(clause)?'単価相談':'単価要確認';
+  // 金額・交通費表記だけをカードへ。切り離した全文は詳細で確認できる。
+  return clause.length<=90?clause:clause.slice(0,90)+'…';
+}
+function wcJobPayAmountsV75215_(value){
+  const text=wcJobPriceClauseV75215_(value).replace(/,/g,'');
+  const amounts=[];
+  const pattern=/(\d+(?:\.\d+)?)\s*(万円?|円)?/g;
+  let hit;
+  while((hit=pattern.exec(text))){
+    const n=Number(hit[1])*(hit[2]&&hit[2].startsWith('万')?10000:1);
+    // 稼働日数、日付、店舗名に含まれる小さな数値は単価にしない。
+    if(Number.isFinite(n)&&n>=500&&n<=10000000)amounts.push(n);
+  }
+  if(!amounts.length)return {amount:0,kind:'unknown'};
+  const amount=Math.max(...amounts);
+  const kind=/月給|月額|月単価|月収|月払い|\/月/.test(text)||amount>=100000?'monthly':
+    /時給|時間単価|\/h|\/時|hour/i.test(text)?'hourly':
+    /日給|日当|日額|\/日/.test(text)?'daily':amount<=5000?'hourly':'daily';
+  return {amount,kind};
+}
+function wcJobPayRangeV75215_(){
+  const hourly=jobPayUnit==='hourly';
+  const floor=hourly?1000:10000, ceiling=hourly?5000:50000;
+  const minEl=$('jobPayMin'), maxEl=$('jobPayMax');
+  const lo=Number(minEl?.value??floor),hi=Number(maxEl?.value??ceiling);
+  const specified=Number.isFinite(lo)&&Number.isFinite(hi)&&!(lo===floor&&hi===ceiling);
+  return {specified,min:specified?Math.min(lo,hi):0,max:specified?Math.max(lo,hi):0};
+}
+function wcJobDetailTextV75215_(job){
+  const raw=String(job?.price||'').trim();
+  const original=String(job?.originalText||job?.remarks||'').trim();
+  const shortened=wcJobPriceDisplayV75215_(raw)!==raw.normalize('NFKC');
+  return (original||'詳細情報はありません。')+
+    (raw&&shortened&&!original.includes(raw)?'\n\n【登録された単価・付随情報】\n'+raw:'');
 }
